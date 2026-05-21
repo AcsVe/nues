@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ lang == 'ar' and 'rtl' or 'ltr' }}">
+<head>
+    <script>
+      ;(function () {
+        var t = new URLSearchParams(location.search).get('theme');
+        if (t) document.documentElement.dataset.theme = t;
+      })();
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ lang == 'ar' and 'الروزنامة' or 'Calendar' }}</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="calendar-page"
+      data-lang="{{ lang }}"
+      data-theme="{{ theme or '' }}"
+      data-org-ar="{{ org_ar }}"
+      data-org-en="{{ org_en }}"
+      data-logo="{{ logo }}"
+      data-pre-date="{{ pre_date or '' }}">
+
+    <div class="top-bar">
+        <div class="logo-area">
+            <img src="{{ logo }}" alt="Logo">
+            <div>
+                <h1 id="hdrTitle">{{ lang == 'ar' and org_ar or org_en }}</h1>
+                <p id="hdrSub">{{ lang == 'ar' and 'نظام حجز القاعات والمرافق' or 'Venue & Facility Booking System' }}</p>
+            </div>
+        </div>
+        <div class="top-actions">
+            <div class="clock-display"><i class="fas fa-clock"></i> <span id="clockEl"></span></div>
+            <button class="btn-top" onclick="toggleLang()" id="btnLang"><i class="fas fa-globe"></i> <span id="langTxt">{{ lang == 'ar' and 'EN' or 'عربي' }}</span></button>
+            <a class="btn-top" id="adminLink" href="/admin?lang={{ lang }}{% if theme %}&theme={{ theme }}{% endif %}"><i class="fas fa-lock"></i> <span id="tAdmin">{{ lang == 'ar' and 'لوحة التحكم' or 'Admin' }}</span></a>
+        </div>
+    </div>
+
+    <div class="wrap">
+        <div class="toolbar">
+            <select id="hallFilter" onchange="loadMonth()" aria-label="Filter by venue">
+                <option value="">{{ lang == 'ar' and '— كل القاعات —' or '— All Venues —' }}</option>
+            </select>
+        </div>
+        <div class="cal-card">
+            <div class="cal-nav">
+                <h3 id="mTitle"></h3>
+                <div class="nav-btns">
+                    <button class="nav-btn today-btn" id="btnToday" onclick="goToday()">{{ lang == 'ar' and 'اليوم' or 'Today' }}</button>
+                    <button class="nav-btn" onclick="nav(-1)" aria-label="Previous"><i class="fas fa-chevron-{{ lang == 'ar' and 'right' or 'left' }}"></i></button>
+                    <button class="nav-btn" onclick="nav(1)" aria-label="Next"><i class="fas fa-chevron-{{ lang == 'ar' and 'left' or 'right' }}"></i></button>
+                </div>
+            </div>
+            <div class="cal-grid" id="grid">
+                <div class="cal-hdr" data-ar="الأحد"    data-en="Sun">{{ lang == 'ar' and 'الأحد' or 'Sun' }}</div>
+                <div class="cal-hdr" data-ar="الاثنين"  data-en="Mon">{{ lang == 'ar' and 'الاثنين' or 'Mon' }}</div>
+                <div class="cal-hdr" data-ar="الثلاثاء" data-en="Tue">{{ lang == 'ar' and 'الثلاثاء' or 'Tue' }}</div>
+                <div class="cal-hdr" data-ar="الأربعاء" data-en="Wed">{{ lang == 'ar' and 'الأربعاء' or 'Wed' }}</div>
+                <div class="cal-hdr" data-ar="الخميس"   data-en="Thu">{{ lang == 'ar' and 'الخميس' or 'Thu' }}</div>
+                <div class="cal-hdr" data-ar="الجمعة"   data-en="Fri">{{ lang == 'ar' and 'الجمعة' or 'Fri' }}</div>
+                <div class="cal-hdr" data-ar="السبت"    data-en="Sat">{{ lang == 'ar' and 'السبت' or 'Sat' }}</div>
+            </div>
+            <div class="legend">
+                <span><i style="background:#247680"></i> <span id="lgApp">{{ lang == 'ar' and 'معتمد' or 'Approved' }}</span></span>
+                <span><i style="background:#EBB37B"></i> <span id="lgPend">{{ lang == 'ar' and 'قيد المراجعة' or 'Pending' }}</span></span>
+                <span><i style="background:#e74c3c"></i> <span id="lgBlk">{{ lang == 'ar' and 'غير متاح' or 'Blocked' }}</span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-bg" id="modalBg" onclick="closeModal()">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-hdr">
+                <h3 id="modalTitle"></h3>
+                <button class="modal-cls" onclick="closeModal()" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body" id="modalBody"></div>
+        </div>
+    </div>
+
+    <footer id="footerEl">&copy; <span id="footerYear"></span> <span id="footerOrg">{{ lang == 'ar' and org_ar or org_en }}</span></footer>
+
+    <script src="/static/js/calendar.js"></script>
+</body>
+</html>
