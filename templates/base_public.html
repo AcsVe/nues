@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="{{ lang }}" dir="{{ 'rtl' if lang == 'ar' else 'ltr' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} — {{ brand.org_ar if lang == 'ar' else brand.org_en }}</title>
+
+  <!-- PWA: Add to Home Screen (Android + iOS) -->
+  <link rel="manifest" href="/static/manifest.json">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="{{ brand.org_ar if lang == 'ar' else brand.org_en }}">
+  <meta name="mobile-web-app-capable" content="yes">
+  {% include '_head_assets.html' %}
+  <link rel="stylesheet" href="{{ asset('css/site.css') }}">
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <div id="siteHeader">
+  {% include "_ticker.html" %}
+  <header class="pub-bar">
+    <a class="pub-brand" href="/calendar?lang={{ lang }}">
+      {% include '_brand_logo.html' %}
+      <span><span class="org">{{ brand.org_ar if lang == 'ar' else brand.org_en }}</span>
+      {% if brand.show_sys %}<span class="sys">{{ brand.sys_ar if lang == 'ar' else brand.sys_en }}</span>{% endif %}</span>
+    </a>
+    <nav class="pub-nav">
+      <a class="pn {% if request.endpoint == 'public.calendar' %}active{% endif %}" href="/calendar?lang={{ lang }}">
+        <i class="fas fa-calendar-days"></i> {{ 'الروزنامة' if lang == 'ar' else 'Calendar' }}</a>
+      <a class="pn {% if request.endpoint == 'public.book' %}active{% endif %}" href="/book?lang={{ lang }}">
+        <i class="fas fa-circle-plus"></i> {{ 'حجز جديد' if lang == 'ar' else 'New booking' }}</a>
+      <a class="pn {% if request.endpoint == 'public.lookup' %}active{% endif %}" href="/lookup?lang={{ lang }}">
+        <i class="fas fa-magnifying-glass"></i> {{ 'استعلام' if lang == 'ar' else 'Lookup' }}</a>
+      <a class="pn" href="#" id="installAppBtn" onclick="handleInstallClick(event)" style="display:none">
+        <i class="fas fa-download"></i> {{ 'تثبيت' if lang == 'ar' else 'Install' }}</a>
+      {% set q = request.args.to_dict() %}{% set _ = q.update({'lang': 'en' if lang == 'ar' else 'ar'}) %}
+      {% if lang == 'ar' %}<a class="lang-switch" href="?{{ q|urlencode }}" lang="en" hreflang="en">English</a>
+      {% else %}<a class="lang-switch" href="?{{ q|urlencode }}" lang="ar" hreflang="ar">العربية</a>{% endif %}
+    </nav>
+  </header>
+  </div>
+
+  <div class="container">
+    {% block content %}{% endblock %}
+  </div>
+  <footer class="pub-foot">&copy; <span dir="ltr">{{ now_year }}</span> {{ brand.org_ar if lang == 'ar' else brand.org_en }}
+    · <a href="/admin?lang={{ lang }}"><i class="fas fa-lock"></i> {{ 'لوحة التحكم' if lang == 'ar' else 'Admin' }}</a></footer>
+
+  {% block extra_scripts %}{% endblock %}
+
+  <script>
+    // ── PWA: service worker + Add-to-Home-Screen ──
+    const PWA_LANG_AR = {{ 'true' if lang == 'ar' else 'false' }};
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+
+    let deferredInstallPrompt = null;
+    const installBtn = document.getElementById('installAppBtn');
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches
+                       || window.navigator.standalone === true;
+    const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+
+    if (!isStandalone) {
+      if (isIOS) {
+        // iOS has no install prompt API — show the button, clicking it
+        // explains the manual Share > Add to Home Screen steps.
+        if (installBtn) installBtn.style.display = 'flex';
+      } else {
+        window.addEventListener('beforeinstallprompt', (e) => {
+          // Don't preventDefault() — let the browser's own automatic
+          // install banner show up (Android/Chrome). We still keep a
+          // reference so the sidebar button works too, as a backup for
+          // anyone who dismissed the automatic banner.
+          deferredInstallPrompt = e;
+          if (installBtn) installBtn.style.display = 'flex';
+        });
+      }
+    }
+
+    function handleInstallClick(e) {
+      e.preventDefault();
+      if (isIOS) {
+        alert(PWA_LANG_AR
+          ? 'لإضافة الموقع للشاشة الرئيسية:\n١) اضغط زر المشاركة ⬆️ بأسفل الشاشة\n٢) اختر "Add to Home Screen"'
+          : 'To add this to your Home Screen:\n1) Tap the Share button ⬆️\n2) Choose "Add to Home Screen"');
+        return;
+      }
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.finally(() => {
+          deferredInstallPrompt = null;
+          if (installBtn) installBtn.style.display = 'none';
+        });
+      }
+    }
+
+    window.addEventListener('appinstalled', () => {
+      if (installBtn) installBtn.style.display = 'none';
+    });
+  </script>
+</body>
+</html>

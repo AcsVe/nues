@@ -1,784 +1,530 @@
-/* ACS Admin — ported 1:1 from GAS adminScript(L,base,dir).
- * Replaces google.script.run calls with Flask fetch endpoints.
- */
-(function(){
-  var lang = window.LANG_INIT || "ar";
-  var dir  = lang === "ar" ? "rtl" : "ltr";
-  var ORG_AR = window.ORG_AR || "";
-  var ORG_EN = window.ORG_EN || "";
-  var LOGO_URL = window.LOGO_URL || "";
-  var allData = [], hallsCache = [], isLoggedIn = false;
+/* لوحة التحكم: تبويبات بصلاحياتها، وجداول موحّدة (بحث وتصفية لكل عمود وترتيب وتحديد متعدد وإجراءات جماعية)،
+   وتقويم، وتقارير، وإعدادات، والشريط الإخباري. كل طلب كتابة يحمل رمز CSRF. */
+(function () {
+  'use strict';
+  var AR = document.documentElement.lang !== 'en';
+  var L = function (a, e) { return AR ? a : e; };
+  var $ = function (id) { return document.getElementById(id); };
+  var ME = window.ME || { perms: [] };
+  var CATS = window.CATEGORIES || [];
+  var halls = [], bookings = [], curStatus = 'all', statFilter = '';
+  var can = function (p) { return ME.sysadmin || (Array.isArray(p) ? p.some(function (x) { return ME.perms.indexOf(x) >= 0; }) : ME.perms.indexOf(p) >= 0); };
 
-  // ───── helpers ─────
-  function esc(t){return t?String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"";}
-  function fmtD(ds){return ds?String(ds):"";}
-  function showSt(m,tp){var s=document.getElementById("status");if(!s)return;s.textContent=m;s.className=tp==="ok"?"st-ok":"st-err";s.style.display="block";if(tp)setTimeout(function(){s.style.display="none"},4000);}
-  function stLbl(s){return lang==="ar"?({pending:"قيد المراجعة",approved:"معتمد",rejected:"مرفوض",cancelled:"ملغي"})[s]:({pending:"Pending",approved:"Approved",rejected:"Rejected",cancelled:"Cancelled"})[s];}
-
-  // fetch wrappers
-  function api(path,opt){
-    opt = opt || {};
-    opt.credentials = "same-origin";
-    if(opt.method && opt.method!=="GET"){opt.headers=Object.assign({"X-CSRF-Token":window.CSRF||""},opt.headers||{});}
-    if(opt.body && typeof opt.body!=="string" && !(window.FormData && opt.body instanceof FormData)){
-      opt.headers = Object.assign({"Content-Type":"application/json"},opt.headers||{});
-      opt.body = JSON.stringify(opt.body);
-    }
-    return fetch(path,opt).then(function(r){
-      return r.json().then(function(j){
-        if(!r.ok){var msg=(j&&j.error)?j.error:("HTTP "+r.status);var e=new Error(msg);e.payload=j;throw e;}
-        return j;
-      });
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+  function nm(h) { return AR ? h.nameAr : (h.nameEn || h.nameAr); }
+  function hallLabel(arName) { var h = halls.filter(function (x) { return x.nameAr === arName; })[0]; return h ? nm(h) : arName; }
+  function catLabel(k) { var c = CATS.filter(function (x) { return x.key === k; })[0]; return c ? (AR ? c.ar : c.en) : k; }
+  function ammanNow() {
+    var p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Amman', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+      .formatToParts(new Date()).reduce(function (a, x) { a[x.type] = x.value; return a; }, {});
+    return p.year + '-' + p.month + '-' + p.day + ' ' + p.hour + ':' + p.minute + ':' + p.second;
+  }
+  function today() { return ammanNow().slice(0, 10); }
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+  var toastTimer;
+  function toast(msg, bad) {
+    var t = $('toast'); t.textContent = msg; t.style.background = bad ? '#991b1b' : ''; t.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.classList.remove('show'); }, 4200);
+  }
+  function api(url, opt) {
+    opt = opt || {}; opt.credentials = 'same-origin'; opt.headers = Object.assign({}, opt.headers);
+    if (opt.method && opt.method !== 'GET') opt.headers['X-CSRF-Token'] = window.CSRF || '';
+    if (opt.body && typeof opt.body !== 'string' && !(window.FormData && opt.body instanceof FormData)) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(opt.body); }
+    return fetch(url, opt).then(function (r) {
+      if (r.status === 401) { location.href = '/admin/login?lang=' + (AR ? 'ar' : 'en'); throw new Error('401'); }
+      return r.json().then(function (j) { if (!r.ok) { var e = new Error((AR ? (j.errorAr || j.error) : (j.errorEn || j.error)) || ('HTTP ' + r.status)); e.status = r.status; throw e; } return j; });
     });
   }
+  function post(url, body) { return api(url, { method: 'POST', body: body || {} }); }
+  function fail(e) { toast(e.message || L('حدث خطأ', 'An error occurred'), true); }
+  function open(id) { $(id).classList.add('open'); }
+  function close(el) { el.closest('.modal-overlay').classList.remove('open'); }
+  document.addEventListener('click', function (e) {
+    var c = e.target.closest('[data-close]'); if (c) close(c);
+    if (e.target.classList && e.target.classList.contains('modal-overlay')) e.target.classList.remove('open');
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') [].forEach.call(document.querySelectorAll('.modal-overlay.open'), function (m) { m.classList.remove('open'); }); });
 
-
-  function T(ar,en){return lang==="ar"?ar:en;}
-  function isoVal(d){return ' data-value="'+esc(d)+'"';}
-
-  // ───── جداول موحّدة: رأس ثابت، بحث، تصفية لكل عمود، ترتيب، تحديد متعدد وإجراءات جماعية ─────
-  function tableHtml(key,cols,rows){
-    var th='<th class="chk" data-nosort><input type="checkbox" class="bulk-all" aria-label="'+T("تحديد الكل","Select all")+'"></th>';
-    cols.forEach(function(c){
-      th+='<th'+(c.filter?' data-filter="'+c.filter+'"':'')+(c.sort?' data-sort="'+c.sort+'"':'')+(c.act?' class="act" data-nosort':'')+'>'+c.h+'</th>';
-    });
-    return '<div class="bulk-bar" id="bar-'+key+'"></div><div class="dt-wrap"><table data-table data-key="'+key+'"><thead><tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  // ───── الساعة والتبويبات ─────
+  setInterval(function () { $('clockEl').textContent = ammanNow().replace(' ', ' | '); }, 1000); $('clockEl').textContent = ammanNow().replace(' ', ' | ');
+  var TITLES = { home: L('الرئيسية', 'Home'), bookings: L('طلبات الحجز', 'Booking requests'), calview: L('التقويم', 'Calendar'), blocked: L('غير متاح', 'Unavailable'),
+    reports: L('التقارير', 'Reports'), halls: L('المباني والمرافق', 'Buildings and facilities'), contacts: L('جهات الاتصال', 'Contacts'),
+    ticker: L('الشريط الإخباري', 'News ticker'), links: L('الروابط المختصرة', 'Short links'), archive: L('الأرشفة', 'Archive'), settings: L('الإعدادات', 'Settings'), users: L('المستخدمون والصلاحيات', 'Users and permissions') };
+  var loaded = {};
+  function showTab(name, force) {
+    if (!$('tab-' + name)) name = 'home';
+    [].forEach.call(document.querySelectorAll('.tab-panel'), function (p) { p.classList.toggle('active', p.id === 'tab-' + name); });
+    [].forEach.call(document.querySelectorAll('.nav-item[data-tab]'), function (b) { b.classList.toggle('active', b.dataset.tab === name); });
+    $('pageTitle').textContent = TITLES[name] || '';
+    if (window.closeSidebar) window.closeSidebar();
+    try { history.replaceState(null, '', '#' + name); } catch (e) { /* لا يهم */ }
+    var load = { bookings: loadBookings, calview: loadCal, blocked: loadBlocked, reports: loadReports, halls: loadHalls, contacts: loadContacts, ticker: loadTicker, links: loadLinks, archive: function () { /* يعمل بالأزرار */ }, settings: loadSettings, users: loadUsers, home: loadHome }[name];
+    if (load && (force || !loaded[name] || name === 'home' || name === 'bookings')) { loaded[name] = true; load(); }
+    window.scrollTo(0, 0);
   }
-  function chkCell(id){return '<td class="chk"><input type="checkbox" class="bulk-item" value="'+esc(id)+'" aria-label="'+T("تحديد","Select")+'"></td>';}
-  function mountTable(box,key,actions,run){
-    if(window.dtInit)window.dtInit(box);
-    var bar=box.querySelector("#bar-"+key),table=box.querySelector("table"),all=table.querySelector(".bulk-all");
-    bar.innerHTML='<span class="bulk-count"></span>'+actions.map(function(a){
-      return '<button type="button" class="hbtn '+(a.danger?"danger":"sec")+' sm" data-act="'+a.id+'" disabled>'+a.label+'</button>';}).join("");
-    function items(){return [].slice.call(table.querySelectorAll("tbody .bulk-item"));}
-    function sel(){return items().filter(function(i){return i.checked&&!i.closest("tr").hidden;}).map(function(i){return i.value;});}
-    function refresh(){
-      var n=sel().length;
-      bar.querySelector(".bulk-count").textContent=n?T("المحدد: ","Selected: ")+n:T("لم يُحدَّد شيء","Nothing selected");
-      [].forEach.call(bar.querySelectorAll("button"),function(b){b.disabled=!n;});
-      var vis=items().filter(function(i){return !i.closest("tr").hidden;});
-      all.checked=!!vis.length&&vis.every(function(i){return i.checked;});
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-tab],[data-go]');
+    if (b && (b.classList.contains('nav-item') || b.dataset.go)) { e.preventDefault(); showTab(b.dataset.tab || b.dataset.go); }
+  });
+  $('refreshBtn').addEventListener('click', function () { loaded = {}; showTab((location.hash || '#home').slice(1), true); loadHallsList(); toast(L('تم التحديث', 'Refreshed')); });
+  document.addEventListener('keydown', function (e) { var k = e.target.closest && e.target.closest('.kpi'); if (k && e.key === 'Enter') k.click(); });
+
+  // ───── جداول موحّدة ─────
+  function tableHtml(key, cols, rows, opts) {
+    opts = opts || {};
+    var th = opts.noSelect ? '' : '<th class="chk" data-nosort><input type="checkbox" class="bulk-all" aria-label="' + L('تحديد الكل', 'Select all') + '"></th>';
+    cols.forEach(function (c) { th += '<th' + (c.filter ? ' data-filter="' + c.filter + '"' : '') + (c.sort ? ' data-sort="' + c.sort + '"' : '') + (c.act ? ' class="act" data-nosort' : '') + '>' + c.h + '</th>'; });
+    return (opts.noSelect ? '' : '<div class="bulk-bar" id="bar-' + key + '"></div>') + '<div class="dt-wrap"><table data-table class="dt" data-key="' + key + '"><thead><tr>' + th + '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+  function chk(id) { return '<td class="chk"><input type="checkbox" class="bulk-item" value="' + esc(id) + '" aria-label="' + L('تحديد', 'Select') + '"></td>'; }
+  function mount(box, key, actions, run) {
+    if (window.dtInit) window.dtInit(box);
+    var bar = box.querySelector('#bar-' + key), table = box.querySelector('table'), all = table.querySelector('.bulk-all');
+    if (!bar || !all) return;
+    bar.innerHTML = '<span class="bulk-count"></span>' + actions.map(function (a) { return '<button type="button" class="btn ' + (a.danger ? 'btn-red' : 'btn-outline') + ' btn-sm" data-act="' + a.id + '" disabled>' + a.label + '</button>'; }).join('');
+    function items() { return [].slice.call(table.querySelectorAll('tbody .bulk-item')); }
+    function sel() { return items().filter(function (i) { return i.checked && !i.closest('tr').hidden; }).map(function (i) { return i.value; }); }
+    function refresh() {
+      var n = sel().length;
+      bar.querySelector('.bulk-count').textContent = n ? L('المحدّد: ', 'Selected: ') + n : L('لم يُحدَّد شيء', 'Nothing selected');
+      [].forEach.call(bar.querySelectorAll('button'), function (b) { b.disabled = !n; });
+      var vis = items().filter(function (i) { return !i.closest('tr').hidden; });
+      all.checked = !!vis.length && vis.every(function (i) { return i.checked; });
     }
-    all.addEventListener("change",function(){items().forEach(function(i){if(!i.closest("tr").hidden)i.checked=all.checked;});refresh();});
-    table.addEventListener("change",function(e){if(e.target.classList.contains("bulk-item"))refresh();});
-    table.addEventListener("input",function(){setTimeout(refresh,0);});
-    bar.addEventListener("click",function(e){
-      var b=e.target.closest("button");if(!b)return;
-      var ids=sel(),a=actions.filter(function(x){return x.id===b.getAttribute("data-act");})[0];
-      if(!ids.length)return;
-      if(a.danger&&!confirm(a.label+" ("+ids.length+")?"))return;
-      run(a.id,ids);
+    all.addEventListener('change', function () { items().forEach(function (i) { if (!i.closest('tr').hidden) i.checked = all.checked; }); refresh(); });
+    table.addEventListener('change', function (e) { if (e.target.classList.contains('bulk-item')) refresh(); });
+    table.addEventListener('input', function () { setTimeout(refresh, 0); });
+    bar.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      var ids = sel(), a = actions.filter(function (x) { return x.id === b.getAttribute('data-act'); })[0];
+      if (!ids.length) return;
+      if (a.danger && !confirm(a.label + ' (' + ids.length + ')؟')) return;
+      run(a.id, ids);
     });
     refresh();
   }
-  function bulkDone(r){
-    var m=T("تم: ","Done: ")+(r.done||0);
-    if(r.skipped)m+=" — "+T("المستبعد: ","Skipped: ")+r.skipped;
-    if(r.notes&&r.notes.length)m+=" — "+r.notes.join("; ");
-    showSt(m,"ok");
+  function bulkDone(r) {
+    var m = L('تم: ', 'Done: ') + (r.done || 0);
+    if (r.skipped) m += ' — ' + L('المستبعد: ', 'Skipped: ') + r.skipped;
+    if (r.notes && r.notes.length) m += ' — ' + r.notes.join('; ');
+    toast(m);
   }
-  function nodata(icon,txt){return '<div class="nodata"><i class="fas fa-'+icon+'"></i>'+txt+'</div>';}
-
-  // ───── clock ─────
-  function ammanNow(){
-    var p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Amman',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'})
-      .formatToParts(new Date()).reduce(function(a,x){a[x.type]=x.value;return a;},{});
-    return p.year+'-'+p.month+'-'+p.day+' | '+p.hour+':'+p.minute+':'+p.second;
+  function empty(icon, msg) { return '<div class="card" style="text-align:center;color:var(--muted)"><i class="fas fa-' + icon + '" style="font-size:2rem;display:block;margin-bottom:8px"></i>' + msg + '</div>'; }
+  var STATUS = { pending: [L('قيد المراجعة', 'Pending'), 'badge-pending'], approved: [L('معتمد', 'Approved'), 'badge-approved'], rejected: [L('مرفوض', 'Rejected'), 'badge-rejected'], cancelled: [L('ملغي', 'Cancelled'), 'badge-cancelled'] };
+  function badge(s) { var x = STATUS[s] || [s, '']; return '<span class="badge ' + x[1] + '">' + esc(x[0]) + '</span>'; }
+  function timeText(b) { return b.fullDay ? L('يوم كامل', 'Full day') : (b.startTime + (b.endTime ? ' - ' + b.endTime : '')); }
+  function dateText(b) { return b.date + (b.endDate && b.endDate !== b.date ? ' → ' + b.endDate : ''); }
+  function fillHallSelect(sel, withAll) {
+    $(sel).innerHTML = (withAll ? '<option value="">' + L('كل المباني والمرافق', 'All buildings and facilities') + '</option>' : '') +
+      halls.map(function (h) { return '<option value="' + esc(h.nameAr) + '">' + esc(nm(h)) + '</option>'; }).join('');
   }
-  function updateClock(){var el=document.getElementById("clockEl");if(el){el.dir="ltr";el.textContent=ammanNow();}}
-  setInterval(updateClock,1000);
+  function loadHallsList() {
+    if (!can(['halls', 'bookings.view', 'bookings.manage', 'blocked', 'contacts'])) return Promise.resolve();
+    return api('/api/admin/halls').then(function (h) { halls = h; fillHallSelect('blkHall', true); fillHallSelect('bkHall'); fillHallSelect('ctHall', true); fillHallSelect('aHall', true); }).catch(function () { /* صلاحية */ });
+  }
 
-  // ───── DOM ready ─────
-  window.addEventListener("DOMContentLoaded",function(){
-    updateClock();
-    var lu=document.getElementById("loginUser"),lp=document.getElementById("loginPass");
-    if(lu)lu.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();lp.focus();}});
-    // Try to load — if 401, prompt login.
-    bootstrap();
-    var cf=document.getElementById("ctFile");
-    if(cf)cf.addEventListener("change",onContactFile);
+  // ───── الرئيسية ─────
+  function loadHome() {
+    if (!can(['bookings.view', 'reports', 'calendar'])) return;
+    api('/api/admin/stats').then(function (s) {
+      $('stTotal').textContent = s.total; $('stPending').textContent = s.pending; $('stApproved').textContent = s.approved; $('stRejected').textContent = s.rejected;
+      $('stToday').textContent = s.today; $('stWeek').textContent = s.week;
+      var nb = $('nbPending'); if (nb) nb.textContent = s.pending;
+      $('upcoming').innerHTML = s.upcoming.length ? '<table><thead><tr><th>' + L('التاريخ', 'Date') + '</th><th>' + L('الوقت', 'Time') + '</th><th>' + L('المبنى أو المرفق', 'Building or facility') + '</th><th>' + L('المناسبة', 'Event') + '</th></tr></thead><tbody>' +
+        s.upcoming.map(function (b) { return '<tr><td dir="ltr">' + esc(dateText(b)) + '</td><td dir="ltr">' + esc(timeText(b)) + '</td><td><bdi>' + esc(hallLabel(b.hall)) + '</bdi></td><td><bdi>' + esc(b.title) + '</bdi></td></tr>'; }).join('') + '</tbody></table>'
+        : '<p class="muted" style="text-align:center;padding:12px">' + L('لا حجوزات قادمة خلال سبعة أيام.', 'No bookings in the next seven days.') + '</p>';
+    }).catch(function () { /* صلاحية */ });
+  }
+  document.addEventListener('click', function (e) {
+    var k = e.target.closest('.kpi[data-stat]'); if (!k) return;
+    statFilter = k.dataset.stat; curStatus = (statFilter === 'today' || statFilter === 'week') ? 'approved' : statFilter;
+    [].forEach.call($('statusBar').querySelectorAll('.filter-btn'), function (b) { b.classList.toggle('active', b.dataset.status === curStatus); });
+    showTab('bookings', true);
   });
 
-  function bootstrap(){
-    api("/api/admin/session").then(function(ss){
-      if(!ss.loggedIn)return null;
-      window.CSRF=ss.csrf||window.CSRF;
-      return api("/api/admin/bookings?status=all");
-    }).then(function(d){
-      if(!d)return;
-      isLoggedIn=true;
-      document.getElementById("loginOverlay").style.display="none";
-      allData=d;renderTable(d);updateStats(d);
-      loadHallsAdmin();loadBlk();loadContacts();loadStats();loadBlkHalls();loadUsers();loadSettings();
-    }).catch(function(){
-      // not logged in — leave overlay visible
-    });
+  // ───── الطلبات ─────
+  $('statusBar').addEventListener('click', function (e) {
+    var b = e.target.closest('.filter-btn'); if (!b) return;
+    curStatus = b.dataset.status; statFilter = '';
+    [].forEach.call(this.querySelectorAll('.filter-btn'), function (x) { x.classList.toggle('active', x === b); });
+    loadBookings();
+  });
+  function loadBookings() {
+    api('/api/admin/bookings?status=' + curStatus).then(function (d) {
+      var t = today(), rows = d;
+      if (statFilter === 'today') rows = d.filter(function (b) { return b.date <= t && b.endDate >= t; });
+      if (statFilter === 'week') { var dt = new Date(t + 'T00:00:00'), dow = (dt.getDay() + 6) % 7, s = new Date(dt); s.setDate(dt.getDate() - dow); var en = new Date(s); en.setDate(s.getDate() + 6);
+        var sd = s.getFullYear() + '-' + pad(s.getMonth() + 1) + '-' + pad(s.getDate()), ed = en.getFullYear() + '-' + pad(en.getMonth() + 1) + '-' + pad(en.getDate()); rows = d.filter(function (b) { return b.date >= sd && b.date <= ed; }); }
+      bookings = d; renderBookings(rows);
+      var pend = bookings.filter(function (b) { return b.status === 'pending'; }).length; if (curStatus === 'all' && $('nbPending')) $('nbPending').textContent = pend;
+    }).catch(fail);
   }
-
-  // ───── login/logout ─────
-  window.doLogin=function(){
-    var u=document.getElementById("loginUser").value.trim();
-    var p=document.getElementById("loginPass").value;
-    var er=document.getElementById("loginErr");
-    if(!u||!p){er.textContent=lang==="ar"?"الرجاء إدخال اسم المستخدم وكلمة المرور":"Please enter username and password";er.style.display="block";return;}
-    api("/api/admin/login",{method:"POST",body:{username:u,password:p}}).then(function(res){
-      if(res&&res.success){window.CSRF=res.csrf||"";isLoggedIn=true;document.getElementById("loginOverlay").style.display="none";bootstrap();}
-      else{er.textContent=lang==="ar"?"اسم المستخدم أو كلمة المرور غير صحيحة":"Invalid username or password";er.style.display="block";document.getElementById("loginPass").value="";}
-    }).catch(function(){er.textContent=lang==="ar"?"اسم المستخدم أو كلمة المرور غير صحيحة":"Invalid username or password";er.style.display="block";});
-  };
-  window.doLogout=function(){api("/api/admin/logout",{method:"POST"}).then(function(){window.top.location.href="/?lang="+lang;}).catch(function(){window.top.location.href="/?lang="+lang;});};
-
-  // ───── halls (for blocked-period select + edit-booking select) ─────
-  function loadBlkHalls(){
-    api("/api/halls").then(function(h){
-      hallsCache=h;
-      var sel=document.getElementById("blkHall");
-      sel.innerHTML='<option value="">'+(lang==="ar"?"— كل القاعات —":"— All Venues —")+"</option>";
-      for(var i=0;i<h.length;i++){
-        var o=document.createElement("option");o.value=h[i].nameAr;o.textContent=lang==="ar"?h[i].nameAr:(h[i].nameEn||h[i].nameAr);sel.appendChild(o);
+  function renderBookings(d) {
+    var box = $('bookingsBox');
+    if (!d.length) { box.innerHTML = empty('inbox', L('لا توجد طلبات.', 'No requests.')); return; }
+    var manage = can('bookings.manage');
+    var cols = [{ h: L('رقم الطلب', 'ID'), filter: 'text' }, { h: L('مقدّم الطلب', 'Applicant'), filter: 'text' }, { h: L('المناسبة', 'Event'), filter: 'text' }, { h: L('المبنى أو المرفق', 'Building or facility'), filter: 'select' },
+      { h: L('التاريخ', 'Date'), filter: 'text' }, { h: L('الوقت', 'Time'), filter: 'text' }, { h: L('الحالة', 'Status'), filter: 'select' }, { h: L('إجراءات', 'Actions'), act: true }];
+    var rows = d.map(function (b) {
+      var act = '';
+      (b.attachments || []).forEach(function (a) { act += '<a class="btn btn-sm btn-blue" href="' + esc(a) + '" target="_blank" rel="noopener" aria-label="' + L('مرفق', 'Attachment') + '"><i class="fas fa-paperclip"></i></a>'; });
+      act += '<button class="btn btn-sm btn-outline" data-cm="' + esc(b.reqId) + '" title="' + L('التعليقات', 'Comments') + '" aria-label="' + L('التعليقات', 'Comments') + '"><i class="fas fa-comment"></i>' + (b.comments ? ' ' + b.comments : '') + '</button>';
+      if (manage) {
+        act += '<button class="btn btn-sm btn-outline" data-edit="' + esc(b.reqId) + '" title="' + L('تعديل', 'Edit') + '" aria-label="' + L('تعديل', 'Edit') + '"><i class="fas fa-pen"></i></button>';
+        if (b.status === 'pending') act += '<button class="btn btn-sm btn-green" data-do="approve" data-id="' + esc(b.reqId) + '" title="' + L('موافقة', 'Approve') + '" aria-label="' + L('موافقة', 'Approve') + '"><i class="fas fa-check"></i></button><button class="btn btn-sm btn-red" data-do="reject" data-id="' + esc(b.reqId) + '" title="' + L('رفض', 'Reject') + '" aria-label="' + L('رفض', 'Reject') + '"><i class="fas fa-xmark"></i></button>';
+        if (b.status !== 'cancelled') act += '<button class="btn btn-sm btn-orange" data-do="cancel" data-id="' + esc(b.reqId) + '" title="' + L('إلغاء', 'Cancel') + '" aria-label="' + L('إلغاء', 'Cancel') + '"><i class="fas fa-ban"></i></button>';
+        if (b.status !== 'pending' && b.status !== 'cancelled') act += '<button class="btn btn-sm btn-outline" data-do="pending" data-id="' + esc(b.reqId) + '" title="' + L('إرجاع إلى قيد المراجعة', 'Back to pending') + '" aria-label="' + L('إرجاع إلى قيد المراجعة', 'Back to pending') + '"><i class="fas fa-rotate-left"></i></button>';
       }
+      return '<tr>' + chk(b.reqId) + '<td class="id-cell">' + esc(b.reqId) + '</td><td><bdi>' + esc(b.name) + '</bdi><span class="sub-line" dir="ltr">' + esc(b.email) + '</span>' + (b.behalf ? '<span class="sub-line"><bdi>' + esc(b.behalf) + '</bdi></span>' : '') + '</td>' +
+        '<td><bdi>' + esc(b.title) + '</bdi></td><td data-value="' + esc(hallLabel(b.hall)) + '"><bdi>' + esc(hallLabel(b.hall)) + '</bdi></td>' +
+        '<td data-value="' + esc(b.date) + '" style="white-space:nowrap" dir="ltr">' + esc(dateText(b)) + '</td><td data-value="' + esc(timeText(b)) + '" style="white-space:nowrap"><span dir="ltr">' + esc(timeText(b)) + '</span></td>' +
+        '<td data-value="' + esc(STATUS[b.status] ? STATUS[b.status][0] : b.status) + '">' + badge(b.status) + (b.rejectReason ? '<div class="reasons"><bdi>' + esc(b.rejectReason) + '</bdi></div>' : '') + '</td><td class="act"><div class="action-btns">' + act + '</div></td></tr>';
+    }).join('');
+    box.innerHTML = tableHtml('bk', cols, rows);
+    mount(box, 'bk', manage ? [{ id: 'approve', label: L('موافقة', 'Approve') }, { id: 'reject', label: L('رفض', 'Reject') }, { id: 'cancel', label: L('إلغاء الحجز', 'Cancel booking'), danger: true },
+      { id: 'pending', label: L('إرجاع إلى قيد المراجعة', 'Back to pending') }, { id: 'delete', label: L('حذف', 'Delete'), danger: true }] : [], function (action, ids) {
+      var run = function (reason) { post('/api/admin/bookings/bulk', { action: action, reqIds: ids, reason: reason || '' }).then(function (r) { bulkDone(r); loadBookings(); loadHome(); }).catch(fail); };
+      if (action === 'reject') askText(L('رفض الطلبات المحدّدة', 'Reject the selected requests'), L('سبب الرفض', 'Rejection reason'), false, run); else run();
     });
   }
-
-  // ───── stat filters ─────
-  window.filterByStat=function(type){
-    switchTab("bookings",document.querySelector(".tab"));
-    if(type==="today"||type==="week"){
-      var btns=document.querySelectorAll(".fbtn");
-      for(var i=0;i<btns.length;i++){btns[i].classList.remove("active");if(btns[i].id==="fAppr")btns[i].classList.add("active");}
-      loadDataInternal("approved",type);
-    }else{
-      loadData(type);
+  // نافذة نص واحد: سبب الرفض أو بريد إبلاغ إضافي
+  var actCb = null;
+  function askText(title, label, ltr, cb, okText) {
+    $('actTitle').textContent = title; $('actExtraLbl').textContent = label; $('actExtra').value = ''; $('actExtra').dir = ltr ? 'ltr' : 'auto';
+    $('actOk').textContent = okText || L('تأكيد', 'Confirm'); actCb = cb; open('mdAction'); setTimeout(function () { $('actExtra').focus(); }, 50);
+  }
+  $('actOk').addEventListener('click', function () { var v = $('actExtra').value.trim(); var cb = actCb; if (cb && cb.length && cb.needValue && !v) return; $('mdAction').classList.remove('open'); if (cb) cb(v); });
+  document.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-do]');
+    if (b) {
+      var id = b.dataset.id, what = b.dataset.do;
+      if (what === 'approve') return askText(L('الموافقة على الحجز ', 'Approve booking ') + id, L('بريد إبلاغ إضافي (اختياري، افصل بفاصلة)', 'Extra BCC emails (optional, comma-separated)'), true, function (v) { post('/api/admin/approve/' + encodeURIComponent(id), { extraBcc: v }).then(function () { toast(L('تمت الموافقة', 'Approved')); loadBookings(); loadHome(); }).catch(fail); }, L('موافقة', 'Approve'));
+      if (what === 'reject') { var rj = function (v) { if (!v) { toast(L('اكتب سبب الرفض', 'Write the rejection reason'), true); return; } post('/api/admin/reject/' + encodeURIComponent(id), { reason: v }).then(function () { toast(L('تم الرفض', 'Rejected')); loadBookings(); loadHome(); }).catch(fail); }; return askText(L('رفض الحجز ', 'Reject booking ') + id, L('سبب الرفض', 'Rejection reason'), false, rj, L('رفض', 'Reject')); }
+      if (!confirm((what === 'cancel' ? L('إلغاء الحجز ', 'Cancel booking ') : L('إرجاع إلى قيد المراجعة: ', 'Back to pending: ')) + id + '؟')) return;
+      post('/api/admin/' + what + '/' + encodeURIComponent(id)).then(function () { toast(L('تم', 'Done')); loadBookings(); loadHome(); }).catch(fail);
+      return;
     }
-  };
+    var ed = e.target.closest('[data-edit]'); if (ed) return openEditBooking(ed.dataset.edit);
+    var cm = e.target.closest('[data-cm]'); if (cm) return openComments(cm.dataset.cm);
+  });
+  function openEditBooking(id) {
+    var b = bookings.filter(function (x) { return x.reqId === id; })[0]; if (!b) return;
+    $('bkReq').textContent = id; $('bkName').value = b.name; $('bkEmail').value = b.email; $('bkPhone').value = b.phone || ''; $('bkBehalf').value = b.behalf || '';
+    $('bkTitle').value = b.title; $('bkHall').value = b.hall; $('bkDate').value = b.date; $('bkEndDate').value = b.endDate; $('bkStart').value = b.startTime; $('bkEnd').value = b.endTime;
+    $('bkFull').checked = !!b.fullDay; $('bkNotes').value = b.notes || ''; open('mdBooking');
+  }
+  $('bkSave').addEventListener('click', function () {
+    post('/api/admin/update/' + encodeURIComponent($('bkReq').textContent), { name: $('bkName').value.trim(), email: $('bkEmail').value.trim(), phone: $('bkPhone').value.trim(), behalf: $('bkBehalf').value.trim(),
+      title: $('bkTitle').value.trim(), hall: $('bkHall').value, date: $('bkDate').value, endDate: $('bkEndDate').value || $('bkDate').value, startTime: $('bkStart').value, endTime: $('bkEnd').value,
+      fullDay: $('bkFull').checked, notes: $('bkNotes').value.trim() }).then(function () { toast(L('تم الحفظ', 'Saved')); $('mdBooking').classList.remove('open'); loadBookings(); }).catch(fail);
+  });
+  var cmReq = '';
+  function openComments(id) {
+    cmReq = id; $('cmReq').textContent = id; $('cmBody').value = ''; $('cmForm').style.display = can('bookings.manage') ? '' : 'none'; $('cmSend').style.display = can('bookings.manage') ? '' : 'none';
+    api('/api/admin/comments/' + encodeURIComponent(id)).then(function (rows) {
+      $('cmList').innerHTML = rows.length ? rows.map(function (c) { return '<div class="comment"><small><bdi>' + esc(c.author) + '</bdi> · <span dir="ltr">' + esc(c.at) + '</span></small><bdi>' + esc(c.body).replace(/\n/g, '<br>') + '</bdi></div>'; }).join('') : '<p class="muted">' + L('لا تعليقات بعد.', 'No comments yet.') + '</p>';
+      open('mdComments');
+    }).catch(fail);
+  }
+  $('cmSend').addEventListener('click', function () {
+    var body = $('cmBody').value.trim(); if (!body) return;
+    post('/api/admin/comments/' + encodeURIComponent(cmReq), { body: body }).then(function () { openComments(cmReq); loadBookings(); }).catch(fail);
+  });
 
-  window.switchTab=function(id,btn){
-    var tabs=document.querySelectorAll(".tab"),contents=document.querySelectorAll(".tab-content");
-    for(var i=0;i<tabs.length;i++){tabs[i].classList.remove("active");contents[i].classList.remove("active");}
-    btn.classList.add("active");
-    document.getElementById("tc-"+id).classList.add("active");
-    if(id==="reports")loadStats();
-  };
+  // ───── التقويم ─────
+  var aCur = { y: +today().slice(0, 4), m: +today().slice(5, 7) }, aData = [];
+  var MONTHS = AR ? ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'] : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  var DAYS = AR ? ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'] : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function loadCal() { api('/api/admin/calendar?year=' + aCur.y + '&month=' + aCur.m).then(function (d) { aData = d; renderCal(); }).catch(fail); }
+  function calOn(ds) { var h = $('aHall').value; return aData.filter(function (b) { return b.date <= ds && b.endDate >= ds && (!h || b.hall === h); }); }
+  function renderCal() {
+    $('aTitle').textContent = MONTHS[aCur.m - 1] + ' ' + aCur.y;
+    var first = new Date(aCur.y, aCur.m - 1, 1).getDay(), days = new Date(aCur.y, aCur.m, 0).getDate(), t = today(), html = '';
+    DAYS.forEach(function (d) { html += '<div class="cal-hdr">' + d + '</div>'; });
+    for (var i = 0; i < first; i++) html += '<div class="cal-day other"></div>';
+    for (var d = 1; d <= days; d++) {
+      var ds = aCur.y + '-' + pad(aCur.m) + '-' + pad(d), bk = calOn(ds);
+      html += '<div class="cal-day' + (ds === t ? ' today' : '') + '" role="button" tabindex="0" data-date="' + ds + '"><span class="dn">' + d + '</span>';
+      bk.slice(0, 3).forEach(function (b) { html += '<span class="ev ' + (b.status === 'pending' ? 'pending' : '') + '"><span class="t">' + esc(hallLabel(b.hall)) + '</span></span>'; });
+      if (bk.length > 3) html += '<span class="more">+' + (bk.length - 3) + '</span>';
+      html += '</div>';
+    }
+    var tail = (7 - (first + days) % 7) % 7; for (var k = 0; k < tail; k++) html += '<div class="cal-day other"></div>';
+    $('aGrid').innerHTML = html;
+  }
+  $('aGrid').addEventListener('click', function (e) {
+    var c = e.target.closest('.cal-day[data-date]'); if (!c) return;
+    $('dayTitle').textContent = c.dataset.date;
+    $('dayList').innerHTML = calOn(c.dataset.date).map(function (b) { return '<div class="item ' + (b.status === 'pending' ? 'pending' : '') + '"><b><bdi>' + esc(b.title) + '</bdi></b> ' + badge(b.status) + '<div class="meta"><span><bdi>' + esc(hallLabel(b.hall)) + '</bdi></span><span dir="ltr">' + esc(timeText(b)) + '</span><span><bdi>' + esc(b.name) + '</bdi></span></div></div>'; }).join('') || '<p class="muted" style="text-align:center">' + L('لا حجوزات.', 'No bookings.') + '</p>';
+    open('mdDay');
+  });
+  function aGo(dm) { aCur.m += dm; if (aCur.m < 1) { aCur.m = 12; aCur.y--; } if (aCur.m > 12) { aCur.m = 1; aCur.y++; } loadCal(); }
+  $('aPrev').addEventListener('click', function () { aGo(-1); }); $('aNext').addEventListener('click', function () { aGo(1); });
+  $('aToday').addEventListener('click', function () { aCur = { y: +today().slice(0, 4), m: +today().slice(5, 7) }; loadCal(); });
+  $('aHall').addEventListener('change', renderCal);
 
-  // ───── bookings table ─────
-  window.loadData=function(f,btn){
-    var btns=document.querySelectorAll(".fbtn");
-    for(var i=0;i<btns.length;i++)btns[i].classList.remove("active");
-    if(btn)btn.classList.add("active");
-    loadDataInternal(f||"all",null);
-  };
+  // ───── الفترات غير المتاحة ─────
+  function loadBlocked() {
+    api('/api/admin/blocked').then(function (d) {
+      var box = $('blockedBox'); if (!d.length) { box.innerHTML = empty('check-circle', L('لا توجد فترات غير متاحة.', 'No unavailable periods.')); return; }
+      var cols = [{ h: L('من', 'From'), filter: 'text' }, { h: L('إلى', 'To'), filter: 'text' }, { h: L('المبنى أو المرفق', 'Building or facility'), filter: 'select' }, { h: L('الوقت', 'Time'), filter: 'text' }, { h: L('السبب', 'Reason'), filter: 'text' }, { h: L('إجراءات', 'Actions'), act: true }];
+      var rows = d.map(function (it) { var h = it.hall ? hallLabel(it.hall) : L('كل المباني والمرافق', 'All buildings and facilities');
+        return '<tr>' + chk(it.id) + '<td dir="ltr" data-value="' + esc(it.start) + '">' + esc(it.start) + '</td><td dir="ltr" data-value="' + esc(it.end) + '">' + esc(it.end) + '</td><td data-value="' + esc(h) + '"><bdi>' + esc(h) + '</bdi></td>' +
+          '<td>' + (it.fromT ? '<span dir="ltr">' + esc(it.fromT) + ' - ' + esc(it.toT) + '</span>' : L('يوم كامل', 'Full day')) + '</td><td><bdi>' + esc(it.reason) + '</bdi></td>' +
+          '<td class="act"><button class="btn btn-sm btn-red" data-delblk="' + it.id + '" title="' + L('حذف', 'Delete') + '" aria-label="' + L('حذف', 'Delete') + '"><i class="fas fa-trash"></i></button></td></tr>'; }).join('');
+      box.innerHTML = tableHtml('blk', cols, rows);
+      mount(box, 'blk', [{ id: 'delete', label: L('حذف', 'Delete'), danger: true }], function (a, ids) { post('/api/admin/blocked/bulk', { ids: ids }).then(function (r) { bulkDone(r); loadBlocked(); }).catch(fail); });
+    }).catch(fail);
+  }
+  $('blkAdd').addEventListener('click', function () {
+    var s = $('blkStart').value, e = $('blkEnd').value; if (!s || !e) return toast(L('حدّد التاريخين', 'Set both dates'), true);
+    post('/api/admin/blocked/add', { start: s, end: e, hall: $('blkHall').value, fromT: $('blkFromT').value, toT: $('blkToT').value, reason: $('blkReason').value.trim() })
+      .then(function () { toast(L('تمت الإضافة', 'Added')); ['blkStart', 'blkEnd', 'blkFromT', 'blkToT', 'blkReason'].forEach(function (i) { $(i).value = ''; }); loadBlocked(); }).catch(fail);
+  });
+  document.addEventListener('click', function (e) {
+    var d = e.target.closest('[data-delblk]'); if (!d || !confirm(L('حذف هذه الفترة؟', 'Delete this period?'))) return;
+    post('/api/admin/blocked/delete/' + d.dataset.delblk).then(loadBlocked).catch(fail);
+  });
 
-  function loadDataInternal(filter,subFilter){
-    api("/api/admin/bookings?status="+encodeURIComponent(filter)).then(function(d){
-      allData=d;
-      var rendered=d;
-      if(subFilter==="today"){
-        var t=new Date();var ds=t.toISOString().slice(0,10);
-        rendered=d.filter(function(r){return r.date===ds;});
-      }else if(subFilter==="week"){
-        var t=new Date();var dow=t.getDay();var s=new Date(t);s.setDate(t.getDate()-dow);
-        var e=new Date(s);e.setDate(s.getDate()+6);
-        var sd=s.toISOString().slice(0,10),ed=e.toISOString().slice(0,10);
-        rendered=d.filter(function(r){return r.date>=sd&&r.date<=ed;});
-      }
-      renderTable(rendered);updateStats(d);
-    }).catch(function(e){showSt("Error: "+e.message,"err");});
+  // ───── التقارير ─────
+  function loadReports() {
+    api('/api/admin/stats').then(function (s) {
+      var max = Math.max.apply(null, s.byHall.map(function (x) { return x.count; }).concat([1]));
+      $('chartTop').innerHTML = s.byHall.length ? s.byHall.slice(0, 10).map(function (x) { return '<div class="bar-item"><div class="bar-label"><bdi>' + esc(hallLabel(x.hall)) + '</bdi></div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(6, x.count / max * 100) + '%"><span>' + x.count + '</span></div></div></div>'; }).join('') : '<p class="muted">' + L('لا بيانات.', 'No data.') + '</p>';
+      var cmax = Math.max.apply(null, s.byCategory.map(function (x) { return x.count; }).concat([1]));
+      $('chartCat').innerHTML = s.byCategory.length ? s.byCategory.map(function (x) { return '<div class="bar-item"><div class="bar-label">' + esc(catLabel(x.category)) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(6, x.count / cmax * 100) + '%"><span>' + x.count + '</span></div></div></div>'; }).join('') : '<p class="muted">' + L('لا بيانات.', 'No data.') + '</p>';
+      var months = Object.keys(s.byMonth).sort().reverse(), names = s.byHall.map(function (x) { return x.hall; });
+      $('monthTable').innerHTML = months.length ? '<div class="table-wrap"><table><thead><tr><th>' + L('الشهر', 'Month') + '</th>' + names.map(function (n) { return '<th><bdi>' + esc(hallLabel(n)) + '</bdi></th>'; }).join('') + '<th>' + L('المجموع', 'Total') + '</th></tr></thead><tbody>' +
+        months.map(function (m) { var tot = 0; return '<tr><td dir="ltr">' + m + '</td>' + names.map(function (n) { var v = s.byMonth[m][n] || 0; tot += v; return '<td>' + (v || '') + '</td>'; }).join('') + '<td><b>' + tot + '</b></td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="muted">' + L('لا بيانات.', 'No data.') + '</p>';
+    }).catch(fail);
   }
 
-  function updateStats(d){
-    var p=0,a=0,r=0;
-    for(var i=0;i<d.length;i++){if(d[i].status==="pending")p++;else if(d[i].status==="approved")a++;else r++;}
-    setT("sAll",d.length);setT("sPend",p);setT("sApp",a);setT("sRej",r);
-  }
-  function setT(id,v){var el=document.getElementById(id);if(el)el.textContent=v;}
-
-  function renderTable(d){
-    var c=document.getElementById("reqTable");
-    if(!d.length){c.innerHTML=nodata("inbox",T("لا توجد طلبات","No requests"));return;}
-    var cols=[{h:T("رقم الطلب","ID"),filter:"text"},{h:T("الاسم","Name"),filter:"text"},{h:T("المناسبة","Event"),filter:"text"},
-      {h:T("القاعة","Venue"),filter:"select"},{h:T("التاريخ","Date"),filter:"text"},{h:T("الوقت","Time"),filter:"text"},
-      {h:T("الحالة","Status"),filter:"select"},{h:T("إجراءات","Actions"),act:true}];
-    var rows="";
-    for(var i=0;i<d.length;i++){
-      var r=d[i],isMulti=r.endDate&&r.endDate!==r.date;
-      var dateDisp='<span dir="ltr">'+fmtD(r.date)+'</span>';
-      if(isMulti)dateDisp+='<br><span class="sub-line">→ <span dir="ltr">'+fmtD(r.endDate)+'</span></span>';
-      var timeTxt=r.fullDay?T("يوم كامل","Full Day"):('<span dir="ltr">'+esc(r.startTime)+(r.endTime?" - "+esc(r.endTime):"")+'</span>');
-      rows+='<tr>'+chkCell(r.reqId)
-        +'<td class="id-cell">'+esc(r.reqId)+'</td>'
-        +'<td><bdi>'+esc(r.name)+'</bdi>'+(r.behalf?'<br><span class="sub-line"><bdi>'+esc(r.behalf)+'</bdi></span>':'')+'</td>'
-        +'<td><bdi>'+esc(r.title)+'</bdi>'+(isMulti?'<br><span class="multiday-tag"><i class="fas fa-calendar-week"></i> '+T("متعدد الأيام","Multi-day")+'</span>':'')+'</td>'
-        +'<td data-value="'+esc(r.hall)+'"><bdi>'+esc(r.hall)+'</bdi></td>'
-        +'<td'+isoVal(r.date)+' style="white-space:nowrap">'+dateDisp+'</td>'
-        +'<td style="white-space:nowrap">'+timeTxt+'</td>'
-        +'<td data-value="'+esc(stLbl(r.status))+'"><span class="st-tag '+r.status+'">'+stLbl(r.status)+'</span>';
-      if(r.status==="rejected"&&r.rejectReason)rows+='<div class="rj-reason"><bdi>'+esc(r.rejectReason)+'</bdi></div>';
-      rows+='</td><td class="act"><div class="tbl-actions">';
-      var att=r.attachments||[];
-      for(var j=0;j<att.length;j++)rows+='<a href="'+esc(att[j])+'" target="_blank" rel="noopener" class="att-link" aria-label="'+T("مرفق","Attachment")+'"><i class="fas fa-paperclip"></i></a>';
-      rows+='<button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick="openEditBk(\''+esc(r.reqId)+'\')"><i class="fas fa-pen"></i></button>';
-      if(r.status==="pending"){
-        rows+='<button class="tbl-btn approve" title="'+T("موافقة","Approve")+'" aria-label="'+T("موافقة","Approve")+'" onclick="showBccInput(\''+esc(r.reqId)+'\')"><i class="fas fa-check"></i></button>';
-        rows+='<button class="tbl-btn reject" title="'+T("رفض","Reject")+'" aria-label="'+T("رفض","Reject")+'" onclick="showRjInput(\''+esc(r.reqId)+'\')"><i class="fas fa-times"></i></button>';
-      }
-      if(r.status!=="cancelled")rows+='<button class="tbl-btn cancel-btn" title="'+T("إلغاء","Cancel")+'" aria-label="'+T("إلغاء","Cancel")+'" onclick="doCancel(\''+esc(r.reqId)+'\')"><i class="fas fa-ban"></i></button>';
-      if(r.status!=="pending"&&r.status!=="cancelled")rows+='<button class="tbl-btn pend-btn" title="'+T("إرجاع إلى قيد المراجعة","Back to pending")+'" aria-label="'+T("إرجاع إلى قيد المراجعة","Back to pending")+'" onclick="doPending(\''+esc(r.reqId)+'\')"><i class="fas fa-undo"></i></button>';
-      rows+='</div>';
-      if(r.status==="pending"){
-        rows+='<div class="bcc-info" style="display:none" id="bcc-info-'+esc(r.reqId)+'"><i class="fas fa-info-circle"></i> '+T("يُرسل إبلاغ تلقائي لجهات الاتصال المسجلة","Auto-sent to registered contacts")+'</div>';
-        rows+='<div class="bcc-input" id="ci-'+esc(r.reqId)+'"><input type="text" id="cc-'+esc(r.reqId)+'" placeholder="'+T("بريد إبلاغ إضافي (افصل بفاصلة)","Additional BCC emails (comma-separated)")+'" dir="ltr"><button aria-label="'+T("موافقة","Approve")+'" onclick="doApprove(\''+esc(r.reqId)+'\')"><i class="fas fa-check"></i></button></div>';
-        rows+='<div class="rj-input" id="ri-'+esc(r.reqId)+'"><input type="text" id="rr-'+esc(r.reqId)+'" placeholder="'+T("سبب الرفض","Rejection reason")+'"><button aria-label="'+T("رفض","Reject")+'" onclick="doReject(\''+esc(r.reqId)+'\')"><i class="fas fa-times"></i></button></div>';
-      }
-      rows+='</td></tr>';
-    }
-    c.innerHTML=tableHtml("bk",cols,rows);
-    mountTable(c,"bk",[
-      {id:"approve",label:T("موافقة","Approve")},{id:"reject",label:T("رفض","Reject")},
-      {id:"cancel",label:T("إلغاء الحجز","Cancel booking"),danger:true},{id:"pending",label:T("إرجاع إلى قيد المراجعة","Back to pending")},
-      {id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
-        var body={action:action,reqIds:ids};
-        if(action==="reject"){var rs=prompt(T("سبب الرفض:","Rejection reason:"));if(!rs)return;body.reason=rs;}
-        api("/api/admin/bookings/bulk",{method:"POST",body:body}).then(function(r){bulkDone(r);loadData("all");})
-          .catch(function(e){showSt(e.message,"err");});
-      });
-  }
-
-  // row actions
-  window.showBccInput=function(id){
-    var ci=document.getElementById("ci-"+id),bi=document.getElementById("bcc-info-"+id),ri=document.getElementById("ri-"+id);
-    ri.classList.remove("show");bi.style.display=ci.classList.contains("show")?"none":"block";ci.classList.toggle("show");
-  };
-  window.doApprove=function(id){
-    var extra=(document.getElementById("cc-"+id).value||"").trim();
-    document.getElementById("ci-"+id).classList.remove("show");
-    document.getElementById("bcc-info-"+id).style.display="none";
-    if(!confirm((lang==="ar"?"موافقة على ":"Approve ")+id+"?"))return;
-    api("/api/admin/approve/"+encodeURIComponent(id),{method:"POST",body:{extraBcc:extra}})
-      .then(function(){showSt(lang==="ar"?"تمت الموافقة":"Approved","ok");loadData("all");})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-  window.showRjInput=function(id){
-    var ri=document.getElementById("ri-"+id);
-    document.getElementById("ci-"+id).classList.remove("show");
-    document.getElementById("bcc-info-"+id).style.display="none";
-    ri.classList.toggle("show");
-  };
-  window.doReject=function(id){
-    var reason=(document.getElementById("rr-"+id).value||"").trim();
-    if(!reason){showSt(lang==="ar"?"الرجاء إدخال سبب الرفض":"Please enter reason","err");return;}
-    api("/api/admin/reject/"+encodeURIComponent(id),{method:"POST",body:{reason:reason}})
-      .then(function(){showSt(lang==="ar"?"تم الرفض":"Rejected","ok");loadData("all");})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-  window.doCancel=function(id){
-    if(!confirm((lang==="ar"?"إلغاء الحجز ":"Cancel booking ")+id+"?"))return;
-    api("/api/admin/cancel/"+encodeURIComponent(id),{method:"POST"})
-      .then(function(){showSt(lang==="ar"?"تم الإلغاء":"Cancelled","ok");loadData("all");})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-  window.doPending=function(id){
-    if(!confirm((lang==="ar"?"إرجاع إلى قيد المراجعة: ":"Revert to pending: ")+id+"?"))return;
-    api("/api/admin/pending/"+encodeURIComponent(id),{method:"POST"})
-      .then(function(){showSt(lang==="ar"?"تم الإرجاع":"Reverted","ok");loadData("all");})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-
-  // ───── edit booking overlay ─────
-  window.openEditBk=function(reqId){
-    var rec=null;
-    for(var i=0;i<allData.length;i++)if(allData[i].reqId===reqId){rec=allData[i];break;}
-    if(!rec)return;
-    document.getElementById("bkReqId").value=rec.reqId;
-    document.getElementById("bkName").value=rec.name||"";
-    document.getElementById("bkEmail").value=rec.email||"";
-    document.getElementById("bkPhone").value=rec.phone||"";
-    document.getElementById("bkBehalf").value=rec.behalf||"";
-    document.getElementById("bkTitle").value=rec.title||"";
-    document.getElementById("bkDate").value=rec.date||"";
-    document.getElementById("bkEndDate").value=rec.endDate||rec.date||"";
-    document.getElementById("bkStart").value=rec.startTime||"";
-    document.getElementById("bkEnd").value=rec.endTime||"";
-    document.getElementById("bkFullDay").checked=!!rec.fullDay;
-    document.getElementById("bkNotes").value=rec.notes||"";
-    var sel=document.getElementById("bkHall");sel.innerHTML="";
-    for(var i=0;i<hallsCache.length;i++){
-      var o=document.createElement("option");o.value=hallsCache[i].nameAr;o.textContent=lang==="ar"?hallsCache[i].nameAr:(hallsCache[i].nameEn||hallsCache[i].nameAr);
-      if(hallsCache[i].nameAr===rec.hall)o.selected=true;sel.appendChild(o);
-    }
-    document.getElementById("editBkOverlay").classList.add("open");
-  };
-  window.closeEditBk=function(){document.getElementById("editBkOverlay").classList.remove("open");};
-  window.saveEditBk=function(){
-    var reqId=document.getElementById("bkReqId").value;
-    var name=document.getElementById("bkName").value.trim();
-    var email=document.getElementById("bkEmail").value.trim();
-    var title=document.getElementById("bkTitle").value.trim();
-    var hall=document.getElementById("bkHall").value;
-    var date=document.getElementById("bkDate").value;
-    var endDate=document.getElementById("bkEndDate").value||date;
-    if(!name||!email||!title||!hall||!date){showSt(lang==="ar"?"يرجى تعبئة الحقول الإلزامية":"Please fill required fields","err");return;}
-    if(!confirm(lang==="ar"?"حفظ التعديلات وإرسال إشعار؟":"Save changes and send notification?"))return;
-    api("/api/admin/update/"+encodeURIComponent(reqId),{method:"POST",body:{
-      name:name,email:email,phone:document.getElementById("bkPhone").value.trim(),
-      behalf:document.getElementById("bkBehalf").value.trim(),title:title,hall:hall,
-      date:date,endDate:endDate,startTime:document.getElementById("bkStart").value,
-      endTime:document.getElementById("bkEnd").value,fullDay:document.getElementById("bkFullDay").checked,
-      notes:document.getElementById("bkNotes").value.trim()
-    }}).then(function(){showSt(lang==="ar"?"تم الحفظ":"Saved","ok");closeEditBk();loadData("all");})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-
-  // ───── halls admin ─────
-  function loadHallsAdmin(){
-    api("/api/admin/halls").then(function(d){
-      var c=document.getElementById("hallsList");
-      if(!d.length){c.innerHTML=nodata("door-open",T("لا توجد قاعات","No venues"));return;}
-      var cols=[{h:T("الاسم","Name"),filter:"text"},{h:T("الرمز","Code"),filter:"text"},{h:T("السعة","Capacity"),sort:"num"},
-        {h:T("الموقع","Location"),filter:"text"},{h:T("الحالة","Status"),filter:"select"},{h:T("الحجوزات","Bookings"),sort:"num"},
-        {h:T("إجراءات","Actions"),act:true}];
-      var rows="";
-      d.forEach(function(it){
-        var st=it.active?T("فعالة","Active"):T("موقوفة","Inactive");
-        rows+='<tr>'+chkCell(it.id)
-          +'<td><strong><bdi>'+esc(it.nameAr)+'</bdi></strong>'+(it.nameEn?'<br><span class="sub-line" dir="ltr">'+esc(it.nameEn)+'</span>':'')
-          +(it.requiresApproval?'<br><span class="multiday-tag">'+T("تتطلب موافقة","Needs approval")+'</span>':'')+'</td>'
-          +'<td dir="ltr">'+esc(it.code||"")+'</td><td data-value="'+esc(it.capacity||0)+'">'+esc(it.capacity||"")+'</td>'
-          +'<td><bdi>'+esc(it.location||"")+'</bdi></td>'
-          +'<td data-value="'+esc(st)+'"><span class="st-tag '+(it.active?"approved":"cancelled")+'">'+st+'</span></td>'
-          +'<td data-value="'+it.bookings+'">'+it.bookings+'</td>'
-          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick="openEdit('+it.id+')"><i class="fas fa-edit"></i></button>'
-          +'<button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delHall('+it.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
-      });
-      c.innerHTML=tableHtml("halls",cols,rows);
-      mountTable(c,"halls",[{id:"activate",label:T("تفعيل","Activate")},{id:"deactivate",label:T("إيقاف","Deactivate")},
-        {id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
-          api("/api/admin/halls/bulk",{method:"POST",body:{action:action,ids:ids}}).then(function(r){bulkDone(r);loadHallsAdmin();loadBlkHalls();})
-            .catch(function(e){showSt(e.message,"err");});
-        });
+  // ───── المباني والمرافق ─────
+  function loadHalls() {
+    loadHallsList().then(function () {
+      var box = $('hallsBox'); if (!halls.length) { box.innerHTML = empty('building', L('لا توجد مبانٍ أو مرافق.', 'None yet.')); return; }
+      var cols = [{ h: L('الاسم', 'Name'), filter: 'text' }, { h: L('النوع', 'Type'), filter: 'select' }, { h: L('الرمز', 'Code'), filter: 'text' }, { h: L('السعة', 'Capacity'), sort: 'num' }, { h: L('الموقع', 'Location'), filter: 'text' },
+        { h: L('الحالة', 'Status'), filter: 'select' }, { h: L('الحجوزات', 'Bookings'), sort: 'num' }, { h: L('إجراءات', 'Actions'), act: true }];
+      var rows = halls.map(function (h) { var st = h.active ? L('فعّال', 'Active') : L('موقوف', 'Inactive');
+        return '<tr>' + chk(h.id) + '<td><b><bdi>' + esc(h.nameAr) + '</bdi></b>' + (h.nameEn ? '<span class="sub-line" dir="ltr">' + esc(h.nameEn) + '</span>' : '') + (h.requiresApproval ? '<span class="badge badge-pending">' + L('يتطلب موافقة', 'Needs approval') + '</span>' : '') + '</td>' +
+          '<td data-value="' + esc(catLabel(h.category)) + '">' + esc(catLabel(h.category)) + '</td><td dir="ltr">' + esc(h.code || '') + '</td><td data-value="' + esc(h.capacity || 0) + '">' + esc(h.capacity || '') + '</td><td><bdi>' + esc(h.location || '') + '</bdi></td>' +
+          '<td data-value="' + esc(st) + '"><span class="badge ' + (h.active ? 'badge-approved' : 'badge-cancelled') + '">' + st + '</span></td><td data-value="' + h.bookings + '">' + h.bookings + '</td>' +
+          '<td class="act"><div class="action-btns"><button class="btn btn-sm btn-outline" data-hedit="' + h.id + '" title="' + L('تعديل', 'Edit') + '" aria-label="' + L('تعديل', 'Edit') + '"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-red" data-hdel="' + h.id + '" title="' + L('حذف', 'Delete') + '" aria-label="' + L('حذف', 'Delete') + '"><i class="fas fa-trash"></i></button></div></td></tr>'; }).join('');
+      box.innerHTML = tableHtml('halls', cols, rows);
+      mount(box, 'halls', [{ id: 'activate', label: L('تفعيل', 'Activate') }, { id: 'deactivate', label: L('إيقاف', 'Deactivate') }, { id: 'delete', label: L('حذف', 'Delete'), danger: true }], function (a, ids) {
+        post('/api/admin/halls/bulk', { action: a, ids: ids }).then(function (r) { bulkDone(r); loadHalls(); }).catch(fail); });
     });
   }
-  window.addNewHall=function(){
-    var nAr=document.getElementById("hNameAr").value.trim();
-    if(!nAr){showSt(lang==="ar"?"الرجاء إدخال الاسم":"Please enter name","err");return;}
-    api("/api/admin/halls/add",{method:"POST",body:{
-      nameAr:nAr,nameEn:document.getElementById("hNameEn").value.trim(),
-      location:document.getElementById("hLocation").value.trim(),
-      code:document.getElementById("hCode").value.trim(),
-      capacity:document.getElementById("hCapacity").value.trim(),
-      equipment:document.getElementById("hEquipment").value.trim(),
-      description:document.getElementById("hDesc").value.trim(),
-      notes:document.getElementById("hNotes").value.trim(),
-      requiresApproval:document.getElementById("hApproval").checked,
-      active:document.getElementById("hActive").checked
-    }}).then(function(){showSt(lang==="ar"?"تمت الإضافة":"Added","ok");loadHallsAdmin();resetHallForm();loadBlkHalls();})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-  window.resetHallForm=function(){
-    ["hNameAr","hNameEn","hLocation","hCode","hCapacity","hEquipment","hDesc","hNotes"].forEach(function(id){document.getElementById(id).value="";});
-    document.getElementById("hApproval").checked=false;document.getElementById("hActive").checked=true;
-  };
-  window.openEdit=function(id){
-    api("/api/admin/halls").then(function(d){
-      for(var i=0;i<d.length;i++){
-        if(d[i].id===id){
-          var it=d[i];
-          document.getElementById("editRow").value=id;
-          document.getElementById("eNameAr").value=it.nameAr||"";
-          document.getElementById("eNameEn").value=it.nameEn||"";
-          document.getElementById("eLocation").value=it.location||"";
-          document.getElementById("eCode").value=it.code||"";
-          document.getElementById("eCapacity").value=it.capacity||"";
-          document.getElementById("eEquipment").value=it.equipment||"";
-          document.getElementById("eDesc").value=it.description||"";
-          document.getElementById("eNotes").value=it.notes||"";
-          document.getElementById("eApproval").checked=!!it.requiresApproval;
-          document.getElementById("eActive").checked=!!it.active;
-          document.getElementById("editOverlay").classList.add("open");
-          break;
-        }
-      }
-    });
-  };
-  window.closeEdit=function(){document.getElementById("editOverlay").classList.remove("open");};
-  window.saveEdit=function(){
-    var data={
-      id:parseInt(document.getElementById("editRow").value),
-      nameAr:document.getElementById("eNameAr").value.trim(),
-      nameEn:document.getElementById("eNameEn").value.trim(),
-      location:document.getElementById("eLocation").value.trim(),
-      code:document.getElementById("eCode").value.trim(),
-      capacity:document.getElementById("eCapacity").value.trim(),
-      equipment:document.getElementById("eEquipment").value.trim(),
-      description:document.getElementById("eDesc").value.trim(),
-      notes:document.getElementById("eNotes").value.trim(),
-      requiresApproval:document.getElementById("eApproval").checked,
-      active:document.getElementById("eActive").checked
-    };
-    if(!data.nameAr){showSt(lang==="ar"?"الرجاء إدخال الاسم":"Please enter name","err");return;}
-    api("/api/admin/halls/update",{method:"POST",body:data}).then(function(){
-      showSt(lang==="ar"?"تم التعديل":"Updated","ok");closeEdit();loadHallsAdmin();loadBlkHalls();
-    }).catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-  window.delHall=function(id){
-    if(!confirm(lang==="ar"?"حذف هذه القاعة؟":"Delete this venue?"))return;
-    api("/api/admin/halls/delete/"+id,{method:"POST"}).then(function(){loadHallsAdmin();loadBlkHalls();})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
+  function openHall(h) {
+    h = h || {}; $('mdHallTitle').textContent = h.id ? L('تعديل مبنى أو مرفق', 'Edit a building or facility') : L('إضافة مبنى أو مرفق', 'Add a building or facility');
+    $('hId').value = h.id || ''; $('hNameAr').value = h.nameAr || ''; $('hNameEn').value = h.nameEn || ''; $('hCat').value = h.category || 'hall'; $('hCode').value = h.code || ''; $('hLocation').value = h.location || '';
+    $('hCapacity').value = h.capacity || ''; $('hEquip').value = h.equipment || ''; $('hDesc').value = h.description || ''; $('hNotes').value = h.notes || ''; $('hApproval').checked = !!h.requiresApproval; $('hActive').checked = h.id ? !!h.active : true; open('mdHall');
+  }
+  $('hallAdd').addEventListener('click', function () { openHall(); });
+  $('hSave').addEventListener('click', function () {
+    var id = $('hId').value, body = { id: id ? +id : undefined, nameAr: $('hNameAr').value.trim(), nameEn: $('hNameEn').value.trim(), category: $('hCat').value, code: $('hCode').value.trim(), location: $('hLocation').value.trim(),
+      capacity: $('hCapacity').value.trim(), equipment: $('hEquip').value.trim(), description: $('hDesc').value.trim(), notes: $('hNotes').value.trim(), requiresApproval: $('hApproval').checked, active: $('hActive').checked };
+    if (!body.nameAr) return toast(L('الاسم بالعربية مطلوب', 'The Arabic name is required'), true);
+    post(id ? '/api/admin/halls/update' : '/api/admin/halls/add', body).then(function () { toast(L('تم الحفظ', 'Saved')); $('mdHall').classList.remove('open'); loadHalls(); }).catch(fail);
+  });
+  document.addEventListener('click', function (e) {
+    var ed = e.target.closest('[data-hedit]'); if (ed) return openHall(halls.filter(function (h) { return h.id === +ed.dataset.hedit; })[0]);
+    var dl = e.target.closest('[data-hdel]'); if (dl && confirm(L('حذف هذا المبنى أو المرفق؟', 'Delete this building or facility?'))) post('/api/admin/halls/delete/' + dl.dataset.hdel).then(function () { toast(L('تم الحذف', 'Deleted')); loadHalls(); }).catch(fail);
+  });
 
-  // ───── blocked periods ─────
-  function loadBlk(){
-    api("/api/admin/blocked").then(function(d){
-      var c=document.getElementById("blkList");
-      if(!d.length){c.innerHTML=nodata("check-circle",T("لا توجد فترات غير متاحة","No unavailable periods"));return;}
-      var cols=[{h:T("من","From"),filter:"text"},{h:T("إلى","To"),filter:"text"},{h:T("القاعة","Venue"),filter:"select"},
-        {h:T("الوقت","Time"),filter:"text"},{h:T("السبب","Reason"),filter:"text"},{h:T("إجراءات","Actions"),act:true}];
-      var rows="";
-      d.forEach(function(it){
-        var hall=it.hall||T("كل القاعات","All venues");
-        rows+='<tr>'+chkCell(it.id)+'<td'+isoVal(it.start)+' dir="ltr">'+fmtD(it.start)+'</td><td'+isoVal(it.end)+' dir="ltr">'+fmtD(it.end)+'</td>'
-          +'<td data-value="'+esc(hall)+'"><bdi>'+esc(hall)+'</bdi></td>'
-          +'<td>'+(it.fromT&&it.toT?'<span dir="ltr">'+esc(it.fromT)+' – '+esc(it.toT)+'</span>':T("يوم كامل","Full day"))+'</td>'
-          +'<td><bdi>'+esc(it.reason)+'</bdi></td>'
-          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delBlk('+it.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
-      });
-      c.innerHTML=tableHtml("blk",cols,rows);
-      mountTable(c,"blk",[{id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
-        api("/api/admin/blocked/bulk",{method:"POST",body:{ids:ids}}).then(function(r){bulkDone(r);loadBlk();})
-          .catch(function(e){showSt(e.message,"err");});
-      });
-    });
+  // ───── جهات الاتصال ─────
+  var contacts = [];
+  function loadContacts() {
+    loadHallsList().then(function () { return api('/api/admin/contacts'); }).then(function (d) {
+      contacts = d; var box = $('contactsBox'); if (!d.length) { box.innerHTML = empty('address-book', L('لا جهات اتصال بعد.', 'No contacts yet.')); return; }
+      var yes = function (v) { return v ? '<i class="fas fa-check" style="color:var(--ok)" aria-label="' + L('نعم', 'Yes') + '"></i>' : '<span class="muted">—</span>'; };
+      var cols = [{ h: L('البريد الإلكتروني', 'Email'), filter: 'text' }, { h: L('الاسم', 'Name'), filter: 'text' }, { h: L('يخص', 'Concerns'), filter: 'select' }, { h: L('حجز جديد', 'New') }, { h: L('اطّلاع فقط', 'Read-only') },
+        { h: L('اعتماد', 'Approved') }, { h: L('تعليقات', 'Comments') }, { h: L('ملخص وتذكير', 'Summary') }, { h: L('إجراءات', 'Actions'), act: true }];
+      var rows = d.map(function (c) { var h = c.hall ? hallLabel(c.hall) : L('الكل', 'All');
+        return '<tr>' + chk(c.id) + '<td dir="ltr">' + esc(c.email) + '</td><td><bdi>' + esc(c.name) + '</bdi></td><td data-value="' + esc(h) + '"><bdi>' + esc(h) + '</bdi></td><td>' + yes(c.notify_new) + '</td><td>' + yes(c.new_readonly) + '</td><td>' + yes(c.notify_approved) + '</td><td>' + yes(c.notify_comment) + '</td><td>' + yes(c.notify_staff_reminder) + '</td>' +
+          '<td class="act"><div class="action-btns"><button class="btn btn-sm btn-outline" data-cedit="' + c.id + '" title="' + L('تعديل', 'Edit') + '" aria-label="' + L('تعديل', 'Edit') + '"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-red" data-cdel="' + c.id + '" title="' + L('حذف', 'Delete') + '" aria-label="' + L('حذف', 'Delete') + '"><i class="fas fa-trash"></i></button></div></td></tr>'; }).join('');
+      box.innerHTML = tableHtml('ct', cols, rows);
+      mount(box, 'ct', [{ id: 'notify_staff_reminder', label: L('تفعيل الملخص والتذكير', 'Turn on summary and reminder') }, { id: 'off_notify_staff_reminder', label: L('إيقاف الملخص والتذكير', 'Turn off summary and reminder') }, { id: 'delete', label: L('حذف', 'Delete'), danger: true }], function (a, ids) {
+        post('/api/admin/contacts/bulk', { action: a, ids: ids }).then(function (r) { bulkDone(r); loadContacts(); }).catch(fail); });
+    }).catch(fail);
   }
-  window.addBlk=function(){
-    var s=document.getElementById("blkStart").value,e=document.getElementById("blkEnd").value,
-        hall=document.getElementById("blkHall").value,fromT=document.getElementById("blkFromT").value,
-        toT=document.getElementById("blkToT").value,r=document.getElementById("blkReason").value.trim();
-    if(!s||!e){showSt(lang==="ar"?"الرجاء تحديد التواريخ":"Please select dates","err");return;}
-    if(!r){showSt(lang==="ar"?"الرجاء إدخال السبب":"Please enter reason","err");return;}
-    if((fromT&&!toT)||(toT&&!fromT)){showSt(lang==="ar"?"الرجاء تحديد وقت البداية والنهاية معاً":"Please specify both start and end times","err");return;}
-    api("/api/admin/blocked/add",{method:"POST",body:{start:s,end:e,hall:hall,fromT:fromT,toT:toT,reason:r}})
-      .then(function(){
-        showSt(lang==="ar"?"تمت الإضافة":"Added","ok");loadBlk();
-        ["blkStart","blkEnd","blkFromT","blkToT","blkReason"].forEach(function(id){document.getElementById(id).value="";});
-        document.getElementById("blkHall").value="";
-      }).catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-  window.delBlk=function(id){
-    if(!confirm(lang==="ar"?"حذف؟":"Delete?"))return;
-    api("/api/admin/blocked/delete/"+id,{method:"POST"}).then(function(){loadBlk();})
-      .catch(function(e){showSt("Error: "+e.message,"err");});
-  };
+  function openContact(c) {
+    c = c || { notify_new: true, notify_approved: true };
+    $('ctTitle').textContent = c.id ? L('تعديل جهة اتصال', 'Edit a contact') : L('إضافة جهة اتصال', 'Add a contact');
+    $('ctId').value = c.id || ''; $('ctEmail').value = c.email || ''; $('ctName').value = c.name || ''; $('ctHall').value = c.hall || '';
+    $('fNew').checked = !!c.notify_new; $('fRead').checked = !!c.new_readonly; $('fApp').checked = !!c.notify_approved; $('fCom').checked = !!c.notify_comment; $('fRem').checked = !!c.notify_staff_reminder; open('mdContact');
+  }
+  $('ctAdd').addEventListener('click', function () { openContact(); });
+  $('ctSave').addEventListener('click', function () {
+    var id = $('ctId').value, body = { id: id ? +id : undefined, email: $('ctEmail').value.trim(), name: $('ctName').value.trim(), hall: $('ctHall').value,
+      notify_new: $('fNew').checked, new_readonly: $('fRead').checked, notify_approved: $('fApp').checked, notify_comment: $('fCom').checked, notify_staff_reminder: $('fRem').checked };
+    post(id ? '/api/admin/contacts/update' : '/api/admin/contacts/add', body).then(function (r) { toast(id ? L('تم الحفظ', 'Saved') : (r.count ? L('تمت الإضافة', 'Added') : L('البريد غير صالح أو مسجّل مسبقاً', 'The email is invalid or already listed')), !id && !r.count); $('mdContact').classList.remove('open'); loadContacts(); }).catch(fail);
+  });
+  document.addEventListener('click', function (e) {
+    var ed = e.target.closest('[data-cedit]'); if (ed) return openContact(contacts.filter(function (c) { return c.id === +ed.dataset.cedit; })[0]);
+    var dl = e.target.closest('[data-cdel]'); if (dl && confirm(L('حذف جهة الاتصال؟', 'Delete the contact?'))) post('/api/admin/contacts/delete/' + dl.dataset.cdel).then(loadContacts).catch(fail);
+  });
+  $('ctFile').addEventListener('change', function () {
+    var f = this.files[0]; this.value = ''; if (!f) return;
+    var rd = new FileReader(); rd.onload = function (ev) {
+      var list = (String(ev.target.result).match(/[^\s,;"']+@[^\s,;"']+\.[^\s,;"']+/g) || []).map(function (m) { return { email: m }; });
+      if (!list.length) return toast(L('لم تُوجد عناوين بريد صالحة', 'No valid emails found'), true);
+      post('/api/admin/contacts/add', { list: list }).then(function (r) { toast(L('أُضيفت ', 'Added ') + r.count + L(' جهة', ' contact(s)')); loadContacts(); }).catch(fail);
+    }; rd.readAsText(f);
+  });
 
-  // ───── contacts ─────
-  function loadContacts(){
-    api("/api/admin/contacts").then(function(d){
-      var c=document.getElementById("contactsList");
-      if(!d.length){c.innerHTML=nodata("address-book",T("لا توجد جهات اتصال بعد","No contacts yet"));return;}
-      var cols=[{h:T("البريد الإلكتروني","Email"),filter:"text"},{h:T("الاسم","Name"),filter:"text"},{h:T("تاريخ الإضافة","Added"),filter:"text"},{h:T("إجراءات","Actions"),act:true}];
-      var rows="";
-      d.forEach(function(it){
-        rows+='<tr>'+chkCell(it.id)+'<td dir="ltr">'+esc(it.email)+'</td><td><bdi>'+esc(it.name)+'</bdi></td><td dir="ltr" data-value="'+esc(it.addedAt)+'">'+esc(it.addedAt)+'</td>'
-          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick="editContact('+it.id+',\''+esc(it.email).replace(/'/g,"")+'\',\''+esc(it.name).replace(/'/g,"")+'\')"><i class="fas fa-edit"></i></button>'
-          +'<button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delContact('+it.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
-      });
-      c.innerHTML=tableHtml("ct",cols,rows);
-      mountTable(c,"ct",[{id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
-        api("/api/admin/contacts/bulk",{method:"POST",body:{ids:ids}}).then(function(r){bulkDone(r);loadContacts();})
-          .catch(function(e){showSt(e.message,"err");});
-      });
-    });
+  // ───── الإعدادات ─────
+  function loadSettings() {
+    api('/api/admin/settings').then(function (s) {
+      var set = function (id, v) { var el = $(id); if (el) el.value = v; };
+      set('sOrgAr', s.orgAr); set('sOrgEn', s.orgEn); set('sAccent', s.accent); set('sSummaryTime', s.staffDailySummaryTime || '07:00'); set('sLead', s.staffReminderLeadMinutes || '');
+      $('sAutoApprove').checked = !!s.autoApproveBookings; $('sRemindersOn').checked = !!s.remindersEnabled; $('sRemindScheduled').checked = !!s.reminderScheduledEnabled; $('sSummaryOn').checked = !!s.staffDailySummaryEnabled;
+      var img = $('sLogoImg'); if (s.logo) { img.src = s.logo; img.style.display = ''; } else img.style.display = 'none';
+      $('sMail').textContent = s.mail ? L('البريد الإلكتروني مُفعَّل (المرسل: ', 'Email is on (sender: ') + s.sender + ')' : L('البريد الإلكتروني غير مُعدّ: لا تُرسل رسائل الحجز ولا التذكيرات.', 'Email is not set up: booking messages and reminders are not sent.');
+      $('sRemindNote').textContent = L('الإبلاغ بالحجز الجديد والاعتماد والتعليقات يتبع خيارات كل جهة في «جهات الاتصال».', 'New-booking, approval and comment notices follow each contact’s options in “Contacts”.');
+    }).catch(fail);
+    [].forEach.call(document.querySelectorAll('[data-perm]'), function (c) { c.style.display = can(c.dataset.perm) ? '' : 'none'; });
   }
-  window.editContact=function(id,email,name){
-    var e=prompt(T("البريد الإلكتروني:","Email:"),email);if(e===null)return;
-    var n=prompt(T("الاسم:","Name:"),name);if(n===null)return;
-    api("/api/admin/contacts/update",{method:"POST",body:{id:id,email:e.trim(),name:n.trim()}}).then(function(){showSt(T("تم الحفظ","Saved"),"ok");loadContacts();})
-      .catch(function(er){showSt(er.message,"err");});
-  };
-  window.addSingleContact=function(){
-    var em=document.getElementById("ctEmail").value.trim();
-    var nm=document.getElementById("ctName").value.trim();
-    if(!em||em.indexOf("@")<0||em.indexOf("@")>=em.length-1){showSt(lang==="ar"?"الرجاء إدخال بريد إلكتروني صحيح":"Please enter valid email","err");return;}
-    api("/api/admin/contacts/add",{method:"POST",body:{list:[{email:em,name:nm}]}})
-      .then(function(r){
-        showSt((lang==="ar"?"تمت إضافة ":"Added ")+(r.count||1)+(lang==="ar"?" جهة اتصال":" contact(s)"),"ok");
-        document.getElementById("ctEmail").value="";document.getElementById("ctName").value="";loadContacts();
-      }).catch(function(e){showSt("Error: "+e.message,"err");});
-  };
-  window.delContact=function(id){
-    if(!confirm(lang==="ar"?"حذف؟":"Delete?"))return;
-    api("/api/admin/contacts/delete/"+id,{method:"POST"}).then(function(){loadContacts();});
-  };
-  function onContactFile(e){
-    var file=e.target.files[0];if(!file)return;
-    var reader=new FileReader();
-    reader.onload=function(ev){
-      var text=ev.target.result;
-      var lines=text.split(/[\r\n]+/).filter(function(l){return l.trim();});
-      var list=[];
-      for(var i=0;i<lines.length;i++){
-        var parts=lines[i].split(",");var email=parts[0].trim();
-        if(email&&email.indexOf("@")>=0&&email.indexOf("@")<email.length-1)list.push({email:email,name:(parts[1]||"").trim()});
-      }
-      if(!list.length){showSt(lang==="ar"?"لم يتم العثور على عناوين بريد صالحة":"No valid emails found","err");return;}
-      api("/api/admin/contacts/add",{method:"POST",body:{list:list}})
-        .then(function(r){showSt((lang==="ar"?"تمت إضافة ":"Added ")+(r.count||0)+(lang==="ar"?" جهة اتصال":" contact(s)"),"ok");loadContacts();})
-        .catch(function(err){showSt("Error: "+err.message,"err");});
-    };
-    reader.readAsText(file);e.target.value="";
-  }
-
-  // ───── reports / stats ─────
-  function loadStats(){
-    api("/api/admin/stats").then(function(s){
-      setT("sToday",s.today);setT("sWeek",s.week);
-      renderTopChart(s.byHall);renderPeriodStats(s);renderDetailTable(s.byMonth);
-    }).catch(function(){});
-  }
-  function renderTopChart(data){
-    var c=document.getElementById("chartTop");
-    if(!data||!data.length){c.innerHTML='<div class="nodata" style="padding:10px;font-size:13px">'+(lang==="ar"?"لا توجد بيانات":"No data")+'</div>';return;}
-    var mx=data[0].count;var h="";
-    for(var i=0;i<Math.min(data.length,8);i++){
-      var pct=mx>0?Math.round(data[i].count/mx*100):0;
-      h+='<div class="bar-item"><div class="bar-label">'+esc(data[i].hall)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"><span>'+data[i].count+'</span></div></div></div>';
-    }
-    c.innerHTML=h;
-  }
-  function renderPeriodStats(s){
-    var c=document.getElementById("periodStats");
-    var h='<table class="period-table"><thead><tr><th>'+(lang==="ar"?"الفترة":"Period")+'</th><th>'+(lang==="ar"?"المعتمدة":"Approved")+'</th><th>'+(lang==="ar"?"الكل":"Total")+'</th></tr></thead><tbody>'
-      +'<tr><td>'+(lang==="ar"?"اليوم":"Today")+'</td><td style="font-weight:700;color:#1e8449">'+s.today+'</td><td>'+s.total+'</td></tr>'
-      +'<tr><td>'+(lang==="ar"?"هذا الأسبوع":"This Week")+'</td><td style="font-weight:700;color:#1e8449">'+s.week+'</td><td>'+s.total+'</td></tr>'
-      +'<tr><td>'+(lang==="ar"?"المعلّقة":"Pending")+'</td><td style="font-weight:700;color:#EBB37B">'+s.pending+'</td><td>'+s.total+'</td></tr>'
-      +'</tbody></table>';
-    c.innerHTML=h;
-  }
-  function renderDetailTable(byMonth){
-    var c=document.getElementById("detailTable");
-    if(!byMonth||Object.keys(byMonth).length===0){c.innerHTML='<div class="nodata" style="padding:15px">'+(lang==="ar"?"لا توجد بيانات":"No data")+'</div>';return;}
-    var months=Object.keys(byMonth).sort().reverse();
-    var hallSet={};
-    for(var m=0;m<months.length;m++){var halls=Object.keys(byMonth[months[m]]);for(var hh=0;hh<halls.length;hh++)hallSet[halls[hh]]=true;}
-    var hallNames=Object.keys(hallSet);
-    var h='<table><thead><tr><th>'+(lang==="ar"?"الشهر":"Month")+'</th>';
-    for(var i=0;i<hallNames.length;i++)h+='<th>'+esc(hallNames[i])+'</th>';
-    h+='<th>'+(lang==="ar"?"المجموع":"Total")+'</th></tr></thead><tbody>';
-    for(var m=0;m<months.length;m++){
-      h+='<tr><td style="font-weight:700">'+esc(months[m])+'</td>';
-      var rowTotal=0;
-      for(var i=0;i<hallNames.length;i++){var v=byMonth[months[m]][hallNames[i]]||0;rowTotal+=v;h+='<td style="text-align:center;font-weight:600">'+v+'</td>';}
-      h+='<td style="text-align:center;font-weight:800;color:#247680">'+rowTotal+'</td></tr>';
-    }
-    h+='</tbody></table>';c.innerHTML=h;
-  }
-
-  // ───── Data Explorer ─────
-  window.runExplorer=function(){
-    var dim=document.getElementById("anaDim").value;
-    var st=document.getElementById("anaStatus").value;
-    var fromD=document.getElementById("anaFrom").value;
-    var toD=document.getElementById("anaTo").value;
-    var data=allData.filter(function(r){
-      if(st!=="all"&&r.status!==st)return false;
-      if(fromD&&r.date<fromD)return false;
-      if(toD&&r.date>toD)return false;
-      return true;
-    });
-    var groups={};
-    for(var i=0;i<data.length;i++){
-      var key="";
-      if(dim==="hall")key=data[i].hall||"غير محدد";
-      else if(dim==="person")key=data[i].name||"غير محدد";
-      else if(dim==="month")key=(data[i].date||"").substring(0,7);
-      else if(dim==="dow"){var dt=new Date(data[i].date+"T00:00:00");var days=lang==="ar"?["الأحد","الاثنين","الثلاثاء","الأربعاء","الخميس","الجمعة","السبت"]:["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];key=days[dt.getDay()];}
-      if(!key||key==="TaNaN")continue;
-      if(!groups[key])groups[key]={count:0,approved:0,pending:0,hours:0};
-      groups[key].count++;
-      if(data[i].status==="approved")groups[key].approved++;
-      if(data[i].status==="pending")groups[key].pending++;
-      if(data[i].fullDay){groups[key].hours+=8;}
-      else{var s=data[i].startTime||"09:00",e=data[i].endTime||"17:00";groups[key].hours+=calcH(s,e);}
-    }
-    var arr=[];for(var k in groups)arr.push({key:k,data:groups[k]});
-    if(dim==="month")arr.sort(function(a,b){return a.key>b.key?1:-1;});
-    else arr.sort(function(a,b){return b.data.count-a.data.count;});
-    var c=document.getElementById("anaChart");
-    if(!arr.length){c.innerHTML='<div class="nodata">'+(lang==="ar"?"لا توجد بيانات للتحليل":"No data to analyze")+'</div>';document.getElementById("anaTable").innerHTML="";return;}
-    var mx=arr[0].data.count;var h="";
-    for(var i=0;i<Math.min(arr.length,12);i++){
-      var pct=mx>0?Math.round(arr[i].data.count/mx*100):0;
-      h+='<div class="bar-item"><div class="bar-label" title="'+esc(arr[i].key)+'">'+esc(arr[i].key)+'</div><div class="bar-track"><div class="bar-fill" style="width:'+pct+'%"><span>'+arr[i].data.count+'</span></div></div></div>';
-    }
-    c.innerHTML=h;
-    var th='<table class="period-table"><thead><tr><th>'+(lang==="ar"?"العنصر":"Item")+'</th><th>'+(lang==="ar"?"عدد الحجوزات":"Bookings")+'</th><th>'+(lang==="ar"?"معتمدة":"Approved")+'</th><th>'+(lang==="ar"?"قيد المراجعة":"Pending")+'</th><th>'+(lang==="ar"?"الساعات (تقريباً)":"Est. Hours")+'</th></tr></thead><tbody>';
-    for(var i=0;i<arr.length;i++){
-      th+='<tr><td style="font-weight:700">'+esc(arr[i].key)+'</td><td>'+arr[i].data.count+'</td><td style="color:#1e8449">'+arr[i].data.approved+'</td><td style="color:#EBB37B">'+arr[i].data.pending+'</td><td>'+arr[i].data.hours.toFixed(1)+'</td></tr>';
-    }
-    th+='</tbody></table>';document.getElementById("anaTable").innerHTML=th;
-  };
-  function calcH(s,e){if(!s||!e)return 0;var sp=s.split(":"),ep=e.split(":");if(sp.length<2||ep.length<2)return 0;var m1=parseInt(sp[0])*60+parseInt(sp[1]),m2=parseInt(ep[0])*60+parseInt(ep[1]);return Math.max(0,(m2-m1)/60);}
-
-  // ───── PDF export ─────
-  window.exportPDF=function(){
-    var rc=document.getElementById("tc-reports").innerHTML;
-    var orgName=lang==="ar"?ORG_AR:ORG_EN;
-    var w=window.open("","_blank");
-    var dt=ammanNow().slice(0,10);
-    w.document.write("<html dir='"+dir+"' lang='"+lang+"'><head><title>"+(lang==="ar"?"تقرير الحجوزات":"Booking Report")+"</title><link href='https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap' rel='stylesheet'><style>body{font-family:Tajawal,sans-serif;padding:40px;max-width:800px;margin:0 auto;background:#fff;color:#333} .report-header{text-align:center;margin-bottom:40px;padding-bottom:25px;border-bottom:4px solid #EBB37B} .report-header img{height:90px;margin-bottom:20px} .report-header h1{color:#1a5c64;font-size:32px;margin:0;font-weight:800} .report-header h1 span{color:#EBB37B} .report-header p{color:#555;font-size:16px;margin:10px 0 0} table{width:100%;border-collapse:collapse;margin-top:20px} th,td{border:1px solid #ddd;padding:12px;text-align:"+(dir==="rtl"?"right":"left")+";font-size:13px} th{background:#1a5c64;color:#fff;font-weight:700} tr:nth-child(even){background:#f8f9fa} .bar-chart{display:flex;flex-direction:column;gap:8px} .bar-item{display:flex;align-items:center;margin-bottom:10px} .bar-label{font-size:13px;font-weight:600;color:#1a5c64;min-width:140px} .bar-track{flex:1;height:28px;background:#e8eaed;border-radius:8px;overflow:hidden} .bar-fill{height:100%;background:linear-gradient(90deg,#1a5c64,#247680);border-radius:8px;display:flex;align-items:center;justify-content:flex-end;padding:0 10px} .bar-fill span{color:#fff;font-size:13px;font-weight:700} .report-card{margin-bottom:30px;page-break-inside:avoid;background:#fff;border:1px solid #e8eaed;border-radius:12px;padding:25px;box-shadow:0 2px 8px rgba(0,0,0,.05)} h4{color:#1a5c64;margin-bottom:15px;font-size:18px;border-bottom:2px solid #EBB37B;padding-bottom:10px;font-weight:800;display:flex;align-items:center;gap:8px} .period-table th,.period-table td{border:1px solid #ddd;padding:10px;font-size:13px} .period-table th{background:#e8f4f5;color:#1a5c64} .report-grid{display:grid;grid-template-columns:1fr 1fr;gap:25px;margin-bottom:30px} .nodata{text-align:center;padding:20px;color:#aaa;font-size:14px} @media print{body{padding:20px} .report-card{box-shadow:none;border:1px solid #ddd}} button{display:none}</style></head><body><div class='report-header'><img src='"+LOGO_URL+"' alt='Logo'><h1>"+orgName+" <span>| "+(lang==="ar"?"تقرير الحجوزات":"Booking Report")+"</span></h1><p>"+dt+"</p></div>"+rc+"</body></html>");
-    w.document.close();w.focus();setTimeout(function(){w.print();},600);
-  };
-
-  // ───── language toggle (in-place, no reload) ─────
-  window.toggleLang=function(){
-    lang=lang==="ar"?"en":"ar";
-    dir=lang==="ar"?"rtl":"ltr";
-    document.documentElement.lang=lang;document.documentElement.dir=dir;
-    setH("btnLang",'<i class="fas fa-globe"></i> <span>'+(lang==="ar"?"EN":"عربي")+'</span>');
-    setT("hdrTitle",lang==="ar"?ORG_AR:ORG_EN);
-    setT("hdrSub",lang==="ar"?"لوحة التحكم — نظام الحجز":"Admin Panel — Booking System");
-    setT("tCal",lang==="ar"?"الروزنامة":"Calendar");
-    setT("tNew",lang==="ar"?"حجز جديد":"New Booking");
-    setT("tLogout",lang==="ar"?"خروج":"Logout");
-    setHref("linkCal","/?lang="+lang);
-    setHref("linkBook","/book?lang="+lang);
-    setT("slAll",lang==="ar"?"الكل":"Total");setT("slPend",lang==="ar"?"قيد المراجعة":"Pending");
-    setT("slApp",lang==="ar"?"معتمد":"Approved");setT("slRej",lang==="ar"?"مرفوض":"Rejected");
-    setT("slToday",lang==="ar"?"اليوم":"Today");setT("slWeek",lang==="ar"?"هذا الأسبوع":"This Week");
-    setT("ttBook",lang==="ar"?"طلبات الحجز":"Bookings");setT("ttHalls",lang==="ar"?"القاعات":"Venues");
-    setT("ttBlocked",lang==="ar"?"غير متاح":"Unavailable");setT("ttContacts",lang==="ar"?"جهات الإتصال":"Contacts");
-    setT("ttReports",lang==="ar"?"التقارير":"Reports");
-    setT("fAll",lang==="ar"?"الكل":"All");setT("fPend",lang==="ar"?"قيد المراجعة":"Pending");
-    setT("fAppr",lang==="ar"?"معتمد":"Approved");setT("fRej",lang==="ar"?"مرفوض":"Rejected");
-    setT("fCancel",lang==="ar"?"ملغي":"Cancelled");
-    setT("addHallTitle",lang==="ar"?"إضافة قاعة جديدة":"Add New Venue");
-    setT("lblNameAr",lang==="ar"?"الاسم (عربي)  *":"Name (Arabic)  *");
-    setT("lblNameEn",lang==="ar"?"الاسم (إنجليزي)":"Name (English)");
-    setT("lblLocation",lang==="ar"?"الموقع":"Location");setT("lblCode",lang==="ar"?"الرمز":"Code");
-    setT("lblCapacity",lang==="ar"?"السعة":"Capacity");
-    setT("lblEquipment",lang==="ar"?"المعدات والمرافق":"Equipment & Facilities");
-    setT("lblDesc",lang==="ar"?"الوصف":"Description");setT("lblNotes",lang==="ar"?"ملاحظات":"Notes");
-    setT("lblApproval",lang==="ar"?"تتطلب موافقة مسبقة":"Requires Prior Approval");
-    setT("lblActive",lang==="ar"?"قاعة فعالة":"Active Venue");
-    setH("btnAddHall",'<i class="fas fa-plus"></i> '+(lang==="ar"?"إضافة":"Add"));
-    setH("btnResetHall",'<i class="fas fa-times"></i> '+(lang==="ar"?"إلغاء":"Cancel"));
-    setT("blkTitle",lang==="ar"?"الفترات غير المتاحة":"Unavailable Periods");
-    setH("btnAddBlk",'<i class="fas fa-plus"></i> '+(lang==="ar"?"إضافة":"Add"));
-    setT("secAddContact",lang==="ar"?"إضافة جهة اتصال فردية":"Add Individual Contact");
-    setT("secUploadContact",lang==="ar"?"رفع قائمة جهات اتصال":"Upload Contacts List");
-    setT("lblCtName",lang==="ar"?"الاسم (اختياري)":"Name (optional)");
-    setH("lblCtEmail",(lang==="ar"?"البريد الإلكتروني  ":"Email  ")+'<span class="req">*</span>');
-    setT("ctAreaTxt",lang==="ar"?"اضغط لاختيار ملف CSV أو TXT":"Click to select CSV or TXT file");
-    setT("btnPdfTxt",lang==="ar"?"طباعة / تصدير PDF":"Print / Export PDF");
-    setT("rptTop",lang==="ar"?"أكثر القاعات حجزاً":"Most Booked Venues");
-    setT("rptPeriod",lang==="ar"?"حجوزات حسب الفترة":"Bookings by Period");
-    setT("rptDetail",lang==="ar"?"تفصيل الحجوزات لكل قاعة حسب الشهر":"Detailed Bookings per Venue by Month");
-    setT("rptExplorer",lang==="ar"?"مستكشف البيانات والمقارنات":"Data Explorer & Comparisons");
-    setT("lblAnaDim",lang==="ar"?"تجميع البيانات ومقارنة حسب":"Group & Compare By");
-    var anaDim=document.getElementById("anaDim");
-    if(anaDim){
-      anaDim.options[0].text=lang==="ar"?"القاعات (قاعة مقابل قاعة)":"Venues (Hall vs Hall)";
-      anaDim.options[1].text=lang==="ar"?"الأشخاص (نشاط الحاجزين)":"People (Booker Activity)";
-      anaDim.options[2].text=lang==="ar"?"الأشهر (فترة مقابل فترة)":"Months (Period vs Period)";
-      anaDim.options[3].text=lang==="ar"?"أيام الأسبوع (أوقات الذروة)":"Days of Week (Peak Times)";
-    }
-    setT("lblAnaStatus",lang==="ar"?"حالة الحجوزات":"Booking Status");
-    var anaSt=document.getElementById("anaStatus");
-    if(anaSt){
-      anaSt.options[0].text=lang==="ar"?"الكل":"All";
-      anaSt.options[1].text=lang==="ar"?"المعتمدة فقط":"Approved Only";
-      anaSt.options[2].text=lang==="ar"?"قيد المراجعة فقط":"Pending Only";
-    }
-    setT("lblAnaFrom",lang==="ar"?"من تاريخ":"Date From");setT("lblAnaTo",lang==="ar"?"إلى تاريخ":"Date To");
-    setH("btnAnaRun",'<i class="fas fa-chart-bar"></i> '+(lang==="ar"?"تحليل البيانات ومقارنة":"Analyze & Compare"));
-    setT("rptAnaTitle",lang==="ar"?"نتائج التحليل والمقارنة":"Analysis & Comparison Results");
-    loadData("all");loadHallsAdmin();loadBlk();loadContacts();loadStats();loadBlkHalls();updateClock();
-  };
-  function setH(id,h){var el=document.getElementById(id);if(el)el.innerHTML=h;}
-  function setHref(id,href){var el=document.getElementById(id);if(el)el.setAttribute("href",href);}
+  $('sIdentitySave').addEventListener('click', function () {
+    post('/api/admin/settings', { orgAr: $('sOrgAr').value, orgEn: $('sOrgEn').value, accent: $('sAccent').value }).then(function () { toast(L('تم الحفظ، حدّث الصفحة لرؤية الهوية الجديدة', 'Saved - refresh the page to see the new identity')); }).catch(fail);
+  });
+  $('sLogoFile').addEventListener('change', function () {
+    var f = this.files[0]; this.value = ''; if (!f) return; var fd = new FormData(); fd.append('file', f);
+    api('/api/admin/logo', { method: 'POST', body: fd }).then(function () { toast(L('تم رفع الشعار', 'Logo uploaded')); loadSettings(); }).catch(fail);
+  });
+  $('sLogoDel').addEventListener('click', function () { if (confirm(L('إزالة الشعار؟ تظهر أيقونة النظام بدلاً منه.', 'Remove the logo? The system icon is shown instead.'))) post('/api/admin/logo/delete').then(function () { toast(L('تمت الإزالة', 'Removed')); loadSettings(); }).catch(fail); });
+  $('sAutoApprove').addEventListener('change', function () { post('/api/admin/settings', { autoApproveBookings: this.checked }).then(function () { toast(L('تم الحفظ', 'Saved')); }).catch(fail); });
+  $('sRemindSave').addEventListener('click', function () {
+    post('/api/admin/settings', { remindersEnabled: $('sRemindersOn').checked, reminderScheduledEnabled: $('sRemindScheduled').checked, staffDailySummaryEnabled: $('sSummaryOn').checked,
+      staffDailySummaryTime: $('sSummaryTime').value, staffReminderLeadMinutes: $('sLead').value }).then(function () { toast(L('تم الحفظ', 'Saved')); }).catch(fail);
+  });
+  $('pwSave').addEventListener('click', function () {
+    if ($('pwNew').value !== $('pwRep').value) return toast(L('كلمتا المرور الجديدتان غير متطابقتين', 'The new passwords do not match'), true);
+    post('/api/admin/password', { current: $('pwCur').value, new: $('pwNew').value }).then(function (r) { window.CSRF = r.csrf || window.CSRF; toast(L('تم تغيير كلمة المرور', 'Password changed')); ['pwCur', 'pwNew', 'pwRep'].forEach(function (i) { $(i).value = ''; }); }).catch(fail);
+  });
 
   // ───── المستخدمون ─────
-  function loadUsers(){
-    api("/api/admin/users").then(function(d){
-      var c=document.getElementById("usersList");if(!c)return;
-      var cols=[{h:T("اسم المستخدم","Username"),filter:"text"},{h:T("الاسم","Name"),filter:"text"},{h:T("البريد","Email"),filter:"text"},
-        {h:T("الحالة","Status"),filter:"select"},{h:T("آخر دخول","Last sign-in"),filter:"text"},{h:T("إجراءات","Actions"),act:true}];
-      var rows="";
-      d.forEach(function(u){
-        var st=u.active?T("فعال","Active"):T("موقوف","Disabled");
-        rows+='<tr>'+chkCell(u.id)+'<td dir="ltr">'+esc(u.username)+(u.me?' <span class="multiday-tag">'+T("حسابك","You")+'</span>':'')+'</td>'
-          +'<td><bdi>'+esc(u.name)+'</bdi></td><td dir="ltr">'+esc(u.email)+'</td>'
-          +'<td data-value="'+esc(st)+'"><span class="st-tag '+(u.active?"approved":"cancelled")+'">'+st+'</span></td>'
-          +'<td dir="ltr" data-value="'+esc(u.lastLogin)+'">'+esc(u.lastLogin)+'</td>'
-          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick=\'openUser('+JSON.stringify(u).replace(/'/g,"&#39;")+')\'><i class="fas fa-edit"></i></button>'
-          +'<button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delUser('+u.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
-      });
-      c.innerHTML=tableHtml("users",cols,rows);
-      mountTable(c,"users",[{id:"activate",label:T("تفعيل","Activate")},{id:"deactivate",label:T("إيقاف","Deactivate")},
-        {id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
-          api("/api/admin/users/bulk",{method:"POST",body:{action:action,ids:ids}}).then(function(r){bulkDone(r);loadUsers();})
-            .catch(function(e){showSt(e.message,"err");});
-        });
-    }).catch(function(){});
+  var users = [];
+  function loadUsers() {
+    api('/api/admin/users').then(function (d) {
+      users = d; var box = $('usersBox');
+      var cols = [{ h: L('اسم المستخدم', 'Username'), filter: 'text' }, { h: L('الاسم', 'Name'), filter: 'text' }, { h: L('البريد', 'Email'), filter: 'text' }, { h: L('الدور', 'Role'), filter: 'select' }, { h: L('الحالة', 'Status'), filter: 'select' }, { h: L('آخر دخول', 'Last sign-in'), filter: 'text' }, { h: L('إجراءات', 'Actions'), act: true }];
+      var rows = d.map(function (u) { var st = u.active ? L('فعّال', 'Active') : L('موقوف', 'Disabled'), role = u.sysadmin ? L('مدير النظام', 'System administrator') : L('مستخدم', 'User');
+        return '<tr>' + chk(u.id) + '<td dir="ltr">' + esc(u.username) + (u.me ? ' <span class="badge">' + L('حسابك', 'You') + '</span>' : '') + '</td><td><bdi>' + esc(u.name) + '</bdi></td><td dir="ltr">' + esc(u.email) + '</td><td data-value="' + esc(role) + '">' + role + '</td>' +
+          '<td data-value="' + esc(st) + '"><span class="badge ' + (u.active ? 'badge-approved' : 'badge-cancelled') + '">' + st + '</span></td><td dir="ltr" data-value="' + esc(u.lastLogin) + '">' + esc(u.lastLogin) + '</td>' +
+          '<td class="act"><div class="action-btns"><button class="btn btn-sm btn-outline" data-uedit="' + u.id + '" title="' + L('تعديل', 'Edit') + '" aria-label="' + L('تعديل', 'Edit') + '"><i class="fas fa-pen"></i></button><button class="btn btn-sm btn-red" data-udel="' + u.id + '" title="' + L('حذف', 'Delete') + '" aria-label="' + L('حذف', 'Delete') + '"><i class="fas fa-trash"></i></button></div></td></tr>'; }).join('');
+      box.innerHTML = tableHtml('users', cols, rows);
+      mount(box, 'users', [{ id: 'activate', label: L('تفعيل', 'Activate') }, { id: 'deactivate', label: L('إيقاف', 'Deactivate') }, { id: 'delete', label: L('حذف', 'Delete'), danger: true }], function (a, ids) {
+        post('/api/admin/users/bulk', { action: a, ids: ids }).then(function (r) { bulkDone(r); loadUsers(); }).catch(fail); });
+    }).catch(fail);
   }
-  window.openUser=function(u){
-    u=u||{};
-    document.getElementById("uId").value=u.id||"";
-    document.getElementById("uName").value=u.username||"";
-    document.getElementById("uFull").value=u.name||"";
-    document.getElementById("uEmail").value=u.email||"";
-    document.getElementById("uPass").value="";
-    document.getElementById("uActive").checked=u.id?!!u.active:true;
-    document.getElementById("uTitle").textContent=u.id?T("تعديل مستخدم","Edit user"):T("إضافة مستخدم","Add user");
-    document.getElementById("editUserOverlay").classList.add("open");
-  };
-  window.closeUser=function(){document.getElementById("editUserOverlay").classList.remove("open");};
-  window.saveUser=function(){
-    var id=document.getElementById("uId").value;
-    var body={username:document.getElementById("uName").value.trim(),name:document.getElementById("uFull").value.trim(),
-      email:document.getElementById("uEmail").value.trim(),password:document.getElementById("uPass").value,
-      active:document.getElementById("uActive").checked};
-    if(id)body.id=parseInt(id,10);
-    api(id?"/api/admin/users/update":"/api/admin/users/add",{method:"POST",body:body}).then(function(){
-      showSt(T("تم الحفظ","Saved"),"ok");closeUser();loadUsers();
-    }).catch(function(e){showSt(e.message,"err");});
-  };
-  window.delUser=function(id){
-    if(!confirm(T("حذف هذا المستخدم؟","Delete this user?")))return;
-    api("/api/admin/users/delete/"+id,{method:"POST"}).then(function(){loadUsers();}).catch(function(e){showSt(e.message,"err");});
-  };
-
-  // ───── الإعدادات والهوية ─────
-  function loadSettings(){
-    api("/api/admin/settings").then(function(s){
-      var set=function(id,v){var el=document.getElementById(id);if(el)el.value=v;};
-      set("sOrgAr",s.orgAr);set("sOrgEn",s.orgEn);set("sAccent",s.accent);
-      var img=document.getElementById("sLogoImg");if(img&&s.logo){img.src=s.logo;img.style.display="";}else if(img){img.style.display="none";}
-      var m=document.getElementById("sMail");
-      if(m)m.textContent=s.mail?T("البريد الإلكتروني مُفعَّل (المرسل: ","Email is on (sender: ")+s.sender+")":T("البريد الإلكتروني غير مُعدّ: لا تُرسل رسائل الحجز.","Email is not set up: booking messages are not sent.");
-    }).catch(function(){});
+  function setPerms(list) { [].forEach.call(document.querySelectorAll('#mdUser .perm'), function (c) { c.checked = list.indexOf(c.value) >= 0; }); }
+  function openUser(u) {
+    u = u || {}; $('uTitle').textContent = u.id ? L('تعديل مستخدم', 'Edit a user') : L('إضافة مستخدم', 'Add a user');
+    $('uId').value = u.id || ''; $('uName').value = u.username || ''; $('uFull').value = u.name || ''; $('uEmail').value = u.email || ''; $('uPass').value = ''; $('uActive').checked = u.id ? !!u.active : true; $('uSys').checked = !!u.sysadmin;
+    setPerms(u.perms || []); $('uPermBox').style.display = $('uSys').checked ? 'none' : ''; open('mdUser');
   }
-  window.saveSettings=function(){
-    api("/api/admin/settings",{method:"POST",body:{orgAr:document.getElementById("sOrgAr").value,orgEn:document.getElementById("sOrgEn").value,
-      accent:document.getElementById("sAccent").value}}).then(function(){showSt(T("تم الحفظ، حدّث الصفحة لرؤية الهوية الجديدة","Saved - refresh the page to see the new identity"),"ok");})
-      .catch(function(e){showSt(e.message,"err");});
-  };
-  window.uploadLogo=function(inp){
-    if(!inp.files||!inp.files[0])return;
-    var fd=new FormData();fd.append("file",inp.files[0]);
-    api("/api/admin/logo",{method:"POST",body:fd}).then(function(){showSt(T("تم رفع الشعار","Logo uploaded"),"ok");loadSettings();})
-      .catch(function(e){showSt(e.message,"err");});
-    inp.value="";
-  };
-  window.removeLogo=function(){
-    if(!confirm(T("إزالة الشعار؟ تظهر أيقونة النظام بدلاً منه.","Remove the logo? The system icon is shown instead.")))return;
-    api("/api/admin/logo/delete",{method:"POST"}).then(function(){showSt(T("تمت الإزالة","Removed"),"ok");loadSettings();});
-  };
-  window.changePassword=function(){
-    var cur=document.getElementById("pwCur").value,nw=document.getElementById("pwNew").value,rp=document.getElementById("pwRep").value;
-    if(nw!==rp){showSt(T("كلمتا المرور الجديدتان غير متطابقتين","The new passwords do not match"),"err");return;}
-    api("/api/admin/password",{method:"POST",body:{current:cur,new:nw}}).then(function(r){
-      window.CSRF=r.csrf||window.CSRF;showSt(T("تم تغيير كلمة المرور","Password changed"),"ok");
-      ["pwCur","pwNew","pwRep"].forEach(function(id){document.getElementById(id).value="";});
-    }).catch(function(e){showSt(e.message,"err");});
-  };
+  $('userAdd').addEventListener('click', function () { openUser(); });
+  $('uSys').addEventListener('change', function () { $('uPermBox').style.display = this.checked ? 'none' : ''; });
+  $('uPermBox').addEventListener('click', function (e) { var p = e.target.closest('[data-preset]'); if (p) setPerms(p.dataset.preset === 'none' ? [] : (window.PRESETS[p.dataset.preset] || [])); });
+  $('uSave').addEventListener('click', function () {
+    var id = $('uId').value, perms = [].filter.call(document.querySelectorAll('#mdUser .perm'), function (c) { return c.checked; }).map(function (c) { return c.value; });
+    var body = { id: id ? +id : undefined, username: $('uName').value.trim(), name: $('uFull').value.trim(), email: $('uEmail').value.trim(), password: $('uPass').value, active: $('uActive').checked, sysadmin: $('uSys').checked, perms: perms };
+    post(id ? '/api/admin/users/update' : '/api/admin/users/add', body).then(function () { toast(L('تم الحفظ', 'Saved')); $('mdUser').classList.remove('open'); loadUsers(); }).catch(fail);
+  });
+  document.addEventListener('click', function (e) {
+    var ed = e.target.closest('[data-uedit]'); if (ed) return openUser(users.filter(function (u) { return u.id === +ed.dataset.uedit; })[0]);
+    var dl = e.target.closest('[data-udel]'); if (dl && confirm(L('حذف هذا المستخدم؟', 'Delete this user?'))) post('/api/admin/users/delete/' + dl.dataset.udel).then(function () { toast(L('تم الحذف', 'Deleted')); loadUsers(); }).catch(fail);
+  });
 
+  // ───── الشريط الإخباري (محرر Quill) ─────
+  var qAr = null, qEn = null;
+  function makeQuill(sel) {
+    var Size = Quill.import('attributors/style/size'); Size.whitelist = ['14px', '16px', '22px', '32px']; Quill.register(Size, true);
+    return new Quill(sel, { theme: 'snow', modules: { toolbar: [['bold', 'italic', 'underline'], [{ color: [] }, { background: [] }], [{ size: ['14px', '16px', '22px', '32px'] }], ['link'], ['clean']] } });
+  }
+  function loadTicker() {
+    if (typeof Quill === 'undefined') return toast(L('تعذّر تحميل محرر النص: تحقّق من الاتصال بالإنترنت', 'The text editor could not be loaded: check the connection'), true);
+    api('/api/admin/ticker').then(function (c) {
+      if (!qAr) { qAr = makeQuill('#tickerQuill'); qAr.root.setAttribute('dir', 'rtl'); }
+      if (!qEn) qEn = makeQuill('#tickerQuillEn');
+      qAr.root.innerHTML = c.html || ''; qEn.root.innerHTML = c.htmlEn || '';
+      $('tickerEnabled').checked = !!c.enabled; $('tickerSpeed').value = c.speedSeconds || 25; $('tickerRssUrl').value = c.rssUrl || ''; $('tickerRssColor').value = c.rssColor || '#ffffff';
+      $('tickerRssFontSize').value = Math.max(13, c.rssFontSize || 16); $('tickerRssBold').checked = c.rssBold !== false; $('tickerLogoBetween').checked = !!c.logoBetween; $('tickerPulse').checked = !!c.pulse;
+      $('tickerPulseSpeed').value = c.pulseSeconds || 1.6; $('tickerPulseRow').style.display = c.pulse ? '' : 'none'; $('tickerShadow').value = c.textShadow || 'light';
+      $('tickerBgColor').value = c.bgColor || '#075E66'; $('tickerBgOpacity').value = c.bgOpacity || 0; $('tickerBgOpacityVal').textContent = (c.bgOpacity || 0) + '%'; $('tickerTextColor').value = c.textColor || '#ffffff';
+    }).catch(fail);
+  }
+  function previewTicker() {
+    var op = parseInt($('tickerBgOpacity').value, 10) || 0; $('tickerBgOpacityVal').textContent = op + '%';
+    var bar = $('globalTicker'); if (!bar) return; var n = parseInt($('tickerBgColor').value.slice(1), 16);
+    bar.style.background = op > 0 ? 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + op / 100 + ')' : ''; bar.style.setProperty('--ticker-text', $('tickerTextColor').value);
+  }
+  ['tickerBgColor', 'tickerBgOpacity', 'tickerTextColor'].forEach(function (i) { $(i).addEventListener('input', previewTicker); });
+  $('tickerPulse').addEventListener('change', function () { $('tickerPulseRow').style.display = this.checked ? '' : 'none'; });
+  $('tickerSave').addEventListener('click', function () {
+    if (!qAr) return;
+    post('/api/admin/ticker', { enabled: $('tickerEnabled').checked, html: qAr.root.innerHTML, htmlEn: qEn.root.innerHTML, speedSeconds: parseInt($('tickerSpeed').value, 10) || 25, rssUrl: $('tickerRssUrl').value.trim(),
+      rssColor: $('tickerRssColor').value, rssFontSize: parseInt($('tickerRssFontSize').value, 10) || 16, rssBold: $('tickerRssBold').checked, logoBetween: $('tickerLogoBetween').checked, pulse: $('tickerPulse').checked,
+      pulseSeconds: parseFloat($('tickerPulseSpeed').value) || 1.6, textShadow: $('tickerShadow').value, bgColor: $('tickerBgColor').value, bgOpacity: parseInt($('tickerBgOpacity').value, 10) || 0, textColor: $('tickerTextColor').value })
+      .then(function () { toast(L('تم الحفظ', 'Saved')); if (window.reloadTicker) window.reloadTicker(); }).catch(fail);
+  });
+
+  // ───── الروابط المختصرة ─────
+  var links = [];
+  function loadLinks() {
+    api('/api/admin/links').then(function (d) {
+      links = d; var box = $('linksBox'); if (!d.length) { box.innerHTML = empty('link', L('لا روابط مختصرة بعد.', 'No short links yet.')); return; }
+      var cols = [{ h: L('الرابط المختصر', 'Short link'), filter: 'text' }, { h: L('الرابط الأصلي', 'Original link'), filter: 'text' }, { h: L('ملاحظة', 'Note'), filter: 'text' }, { h: L('الحالة', 'Status'), filter: 'select' },
+        { h: L('الضغطات', 'Clicks'), sort: 'num' }, { h: L('آخر ضغطة', 'Last click'), filter: 'text' }, { h: L('إجراءات', 'Actions'), act: true }];
+      var rows = d.map(function (l) { var st = l.active ? L('فعّال', 'Active') : L('موقوف', 'Inactive');
+        return '<tr>' + chk(l.id) + '<td dir="ltr"><a href="' + esc(l.shortUrl) + '" target="_blank" rel="noopener">' + esc(l.shortUrl) + '</a></td><td dir="ltr" style="max-width:320px;overflow-wrap:anywhere">' + esc(l.url) + '</td><td><bdi>' + esc(l.note) + '</bdi></td>' +
+          '<td data-value="' + esc(st) + '"><span class="badge ' + (l.active ? 'badge-approved' : 'badge-cancelled') + '">' + st + '</span></td><td data-value="' + l.clicks + '">' + l.clicks + '</td><td dir="ltr" data-value="' + esc(l.lastClick) + '">' + esc(l.lastClick) + '</td>' +
+          '<td class="act"><div class="action-btns"><button class="btn btn-sm btn-outline" data-lkedit="' + l.id + '" title="' + L('تعديل', 'Edit') + '" aria-label="' + L('تعديل', 'Edit') + '"><i class="fas fa-pen"></i></button></div></td></tr>'; }).join('');
+      box.innerHTML = tableHtml('lk', cols, rows);
+      mount(box, 'lk', [{ id: 'activate', label: L('تفعيل', 'Activate') }, { id: 'deactivate', label: L('إيقاف', 'Deactivate') }, { id: 'delete', label: L('حذف', 'Delete'), danger: true }], function (a, ids) {
+        post('/api/admin/links/bulk', { action: a, ids: ids }).then(function (r) { bulkDone(r); loadLinks(); }).catch(fail); });
+    }).catch(fail);
+  }
+  function openLink(l) {
+    l = l || {}; $('lkTitle').textContent = l.id ? L('تعديل رابط', 'Edit a link') : L('إضافة رابط مختصر', 'Add a short link');
+    $('lkId').value = l.id || ''; $('lkUrl').value = l.url || ''; $('lkSlug').value = l.slug || ''; $('lkNote').value = l.note || ''; $('lkActive').checked = l.id ? !!l.active : true; open('mdLink');
+  }
+  $('linkAdd').addEventListener('click', function () { openLink(); });
+  $('lkSave').addEventListener('click', function () {
+    post('/api/admin/links/save', { id: $('lkId').value ? +$('lkId').value : undefined, url: $('lkUrl').value.trim(), slug: $('lkSlug').value.trim(), note: $('lkNote').value.trim(), active: $('lkActive').checked })
+      .then(function () { toast(L('تم الحفظ', 'Saved')); $('mdLink').classList.remove('open'); loadLinks(); }).catch(fail);
+  });
+  document.addEventListener('click', function (e) { var b = e.target.closest('[data-lkedit]'); if (b) openLink(links.filter(function (l) { return l.id === +b.dataset.lkedit; })[0]); });
+
+  // ───── الأرشفة ─────
+  $('arcPreview').addEventListener('click', function () {
+    var d = $('arcDate').value; if (!d) return toast(L('اختر التاريخ', 'Choose the date'), true);
+    api('/api/admin/archive-preview?before=' + encodeURIComponent(d)).then(function (r) {
+      if (!r.count) { $('arcResult').innerHTML = '<div class="alert alert-info">' + L('لا حجوزات منتهية قبل هذا التاريخ.', 'No bookings ended before this date.') + '</div>'; return; }
+      $('arcResult').innerHTML = '<div class="alert alert-warning"><b>' + r.count + '</b> ' + L('حجز منتهٍ قبل ', 'bookings ended before ') + '<span dir="ltr">' + esc(d) + '</span> (' + L('معتمد ', 'approved ') + r.byStatus.approved + ' · ' + L('مرفوض ', 'rejected ') + r.byStatus.rejected + ' · ' + L('ملغي ', 'cancelled ') + r.byStatus.cancelled + ')</div>' +
+        '<div class="action-btns"><a class="btn btn-primary" href="/api/admin/archive-export?before=' + encodeURIComponent(d) + '"><i class="fas fa-download"></i> ' + L('1) حمِّل الملف', '1) Download the file') + '</a>' +
+        '<input type="text" id="arcConfirm" dir="ltr" placeholder="DELETE" style="max-width:150px" aria-label="' + L('كلمة التأكيد', 'Confirmation word') + '">' +
+        '<button class="btn btn-red" type="button" id="arcDelete"><i class="fas fa-trash"></i> ' + L('2) حذف من النظام', '2) Delete from the system') + '</button></div><p class="hint">' + L('اكتب DELETE (بالإنجليزية) ثم اضغط حذف.', 'Type DELETE and press delete.') + '</p>';
+    }).catch(fail);
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('#arcDelete')) return;
+    post('/api/admin/archive-delete', { before: $('arcDate').value, confirm: $('arcConfirm').value.trim() }).then(function (r) { toast(L('حُذف ', 'Deleted ') + r.deleted + L(' حجزاً', ' bookings')); $('arcResult').innerHTML = ''; }).catch(fail);
+  });
+
+  // ───── تثبيت التطبيق (PWA) ─────
+  var deferred = null, ib = $('installAppBtn');
+  window.addEventListener('beforeinstallprompt', function (e) { deferred = e; if (ib) ib.style.display = 'flex'; });
+  if (ib) ib.addEventListener('click', function (e) { e.preventDefault(); if (deferred) { deferred.prompt(); deferred.userChoice.finally(function () { deferred = null; ib.style.display = 'none'; }); } });
+  if ('serviceWorker' in navigator) window.addEventListener('load', function () { navigator.serviceWorker.register('/sw.js').catch(function () { /* لا يهم */ }); });
+
+  // ───── الإقلاع ─────
+  // القائمة تُخفي ما لا صلاحية له؛ نبدأ بالتبويب في العنوان إن كان مسموحاً
+  loadHallsList().then(function () {
+    var hash = (location.hash || '#home').slice(1);
+    var btn = document.querySelector('.nav-item[data-tab="' + hash + '"]');
+    showTab(btn || hash === 'home' ? hash : 'home');
+    if (can(['bookings.view'])) api('/api/admin/stats').then(function (s) { if ($('nbPending')) $('nbPending').textContent = s.pending; }).catch(function () { /* صلاحية */ });
+  });
 })();

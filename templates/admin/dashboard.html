@@ -1,0 +1,423 @@
+{% set ar = lang != 'en' %}
+{% macro tab_btn(key, perm, icon, ar_t, en_t, badge=None) -%}
+{% if perm is none or perm in me.perms or (perm is not string and perm|select('in', me.perms)|list) %}<button class="nav-item" data-tab="{{ key }}" type="button"><i class="fas fa-{{ icon }}"></i> <span>{{ ar_t if ar else en_t }}</span>{% if badge %} <span class="nav-badge" id="{{ badge }}">0</span>{% endif %}</button>{% endif %}
+{%- endmacro %}
+<!DOCTYPE html>
+<html lang="{{ 'ar' if ar else 'en' }}" dir="{{ 'rtl' if ar else 'ltr' }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ 'لوحة التحكم' if ar else 'Admin panel' }} — {{ brand.org_ar if ar else brand.org_en }}</title>
+  <link rel="manifest" href="/static/manifest.json">
+  {% include '_head_assets.html' %}
+  <link rel="stylesheet" href="{{ asset('css/site.css') }}">
+  <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
+  <style>
+    .main > #globalTicker { position: sticky; left: auto; right: auto; inset: auto; top: 0; width: 100%; z-index: 160; }
+    body.has-ticker .topbar { top: 38px; }
+    .tab-panel { display: none; } .tab-panel.active { display: block; }
+    .home-hello { font-size: 1.35rem; font-weight: 800; color: var(--navy); margin-bottom: 4px; }
+    .home-sub { color: var(--muted); margin-bottom: 18px; font-size: .92rem; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .bulk-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; min-height: 36px; }
+    .bulk-bar .bulk-count { color: var(--muted); font-size: .86rem; margin-inline-end: 6px; }
+    .bulk-bar button:disabled { opacity: 1; background: #e8eef0; color: #5f6f77; cursor: not-allowed; }
+    .dt-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0 0 8px; }
+    .dt-tools input[type=search] { flex: 1 1 200px; max-width: 360px; }
+    .dt-count { color: var(--muted); font-size: .86rem; }
+    .dt-tools button { margin-inline-start: auto; padding: 7px 12px; border: 1.5px solid var(--line); border-radius: 10px; background: #fff; cursor: pointer; font-family: inherit; font-size: .86rem; font-weight: 700; color: var(--navy); }
+    .dt-wrap { overflow: auto; max-height: 68vh; border: 1px solid #d4e8ea; border-radius: 12px; background: #fff; max-width: 100%; -webkit-overflow-scrolling: touch; }
+    .dt-wrap table.dt { min-width: 760px; }
+    .dt-wrap table.dt thead th { position: sticky; top: 0; z-index: 3; }
+    .dt-wrap table.dt thead tr.dt-filter th { top: 42px; z-index: 2; background: #f3fafb; padding: 6px; border-bottom: 1px solid #b5e0e4; }
+    .dt-filter input, .dt-filter select { padding: 5px 8px; min-width: 70px; font-size: .86rem; }
+    table.dt th.dt-sort { cursor: pointer; user-select: none; }
+    table.dt th.dt-sort::after { content: ' ⇅'; color: #5f6f77; }
+    table.dt th.asc::after { content: ' ▲'; color: var(--primary); } table.dt th.desc::after { content: ' ▼'; color: var(--primary); }
+    th.chk, td.chk { width: 40px; text-align: center; }
+    .id-cell { font-weight: 800; color: var(--primary-dark); white-space: nowrap; }
+    .sub-line { font-size: .8125rem; color: var(--muted); display: block; }
+    .reasons { color: #991b1b; background: #fee2e2; border-radius: 6px; padding: 2px 8px; font-size: .8125rem; margin-top: 4px; display: inline-block; }
+    .perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px 14px; }
+    .perm-grid label { display: flex; gap: 8px; align-items: flex-start; font-weight: 600; font-size: .88rem; cursor: pointer; }
+    .perm-box { border: 1.5px solid var(--line); border-radius: 12px; padding: 12px; background: #fbfefe; }
+    .bar-item { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+    .bar-label { min-width: 130px; font-size: .86rem; font-weight: 700; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+    .bar-track { flex: 1; background: var(--primary-soft); border-radius: 6px; height: 24px; overflow: hidden; }
+    .bar-fill { height: 100%; background: linear-gradient(90deg, var(--primary-dark), var(--primary-light)); border-radius: 6px; display: flex; align-items: center; padding-inline-start: 6px; min-width: 28px; }
+    .bar-fill span { color: #fff; font-size: .8125rem; font-weight: 800; }
+    .ql-toolbar.ql-snow, .ql-container.ql-snow { border-color: var(--line) !important; }
+    .ql-toolbar.ql-snow { border-radius: 10px 10px 0 0; background: #f3fafb; } .ql-container.ql-snow { border-radius: 0 0 10px 10px; }
+    .a-cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+    .comment { border-inline-start: 4px solid var(--primary); background: var(--primary-soft); border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
+    .comment small { color: var(--muted); display: block; }
+    .modal.wide { max-width: 760px; }
+    .flag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 6px 14px; margin-top: 6px; }
+  </style>
+  <script src="{{ asset('js/app.js') }}"></script>
+  <script src="{{ asset('js/update-notice.js') }}" data-version="{{ app_version }}" data-url="/api/app-version" defer></script>
+</head>
+<body>
+<div class="sidebar-overlay" id="sidebarOverlay" data-nav-close></div>
+<aside class="sidebar" id="sidebar" aria-label="{{ 'القائمة الرئيسية' if ar else 'Main menu' }}">
+  <a class="side-brand" href="#home" data-go="home">
+    {% include '_brand_logo.html' %}
+    <span class="org">{{ brand.org_ar if ar else brand.org_en }}</span>
+    {% if brand.show_sys %}<span class="sys">{{ brand.sys_ar if ar else brand.sys_en }}</span>{% endif %}
+  </a>
+  <nav class="side-nav" id="sideNav">
+    <button class="nav-item active" data-tab="home" type="button"><i class="fas fa-house"></i> <span>{{ 'الرئيسية' if ar else 'Home' }}</span></button>
+    <div class="nav-group"><div class="nav-group-title">{{ 'العمل اليومي' if ar else 'Daily work' }}</div>
+      {{ tab_btn('bookings', 'bookings.view', 'calendar-check', 'طلبات الحجز', 'Booking requests', 'nbPending') }}
+      {{ tab_btn('calview', ('calendar', 'bookings.view'), 'calendar-days', 'التقويم', 'Calendar') }}
+      {{ tab_btn('blocked', 'blocked', 'ban', 'غير متاح', 'Unavailable') }}
+      <a class="nav-item" href="/calendar?lang={{ lang }}" target="_blank" rel="noopener"><i class="fas fa-globe"></i> <span>{{ 'الروزنامة العامة' if ar else 'Public calendar' }}</span> <i class="fas fa-arrow-up-right-from-square ext"></i></a>
+    </div>
+    <div class="nav-group"><div class="nav-group-title">{{ 'القوائم والتقارير' if ar else 'Lists and reports' }}</div>
+      {{ tab_btn('reports', 'reports', 'chart-column', 'التقارير', 'Reports') }}
+    </div>
+    <div class="nav-group"><div class="nav-group-title">{{ 'الإدارة' if ar else 'Administration' }}</div>
+      {{ tab_btn('halls', 'halls', 'building', 'المباني والمرافق', 'Buildings and facilities') }}
+      {{ tab_btn('contacts', 'contacts', 'address-book', 'جهات الاتصال', 'Contacts') }}
+      {{ tab_btn('ticker', 'ticker', 'bullhorn', 'الشريط الإخباري', 'News ticker') }}
+      {{ tab_btn('links', 'links', 'link', 'الروابط المختصرة', 'Short links') }}
+      {{ tab_btn('archive', 'archive', 'box-archive', 'الأرشفة', 'Archive') }}
+      {{ tab_btn('settings', ('settings.identity', 'settings.approval', 'settings.reminders'), 'gear', 'الإعدادات', 'Settings') }}
+      {% if me.sysadmin %}<button class="nav-item" data-tab="users" type="button"><i class="fas fa-users-gear"></i> <span>{{ 'المستخدمون والصلاحيات' if ar else 'Users and permissions' }}</span></button>{% endif %}
+    </div>
+  </nav>
+</aside>
+
+<div class="main">
+  {% include "_ticker.html" %}
+  <header class="topbar">
+    <button class="icon-btn nav-toggle" type="button" data-nav-toggle aria-controls="sidebar" aria-expanded="false" aria-label="{{ 'القائمة' if ar else 'Menu' }}"><i class="fas fa-bars"></i></button>
+    <div class="page-title" id="pageTitle">{{ 'الرئيسية' if ar else 'Home' }}</div>
+    <div class="top-actions">
+      <span class="top-clock" id="clockEl" dir="ltr"></span>
+      <button class="icon-btn" type="button" id="refreshBtn" title="{{ 'تحديث' if ar else 'Refresh' }}" aria-label="{{ 'تحديث' if ar else 'Refresh' }}"><i class="fas fa-rotate"></i></button>
+      {% set q = request.args.to_dict() %}{% set _ = q.update({'lang': 'en' if ar else 'ar'}) %}
+      <a class="lang-switch" href="?{{ q|urlencode }}">{{ 'English' if ar else 'العربية' }}</a>
+      <details class="user-menu">
+        <summary><span class="avatar" aria-hidden="true">{{ me.name[:1] }}</span><span class="uname"><bdi>{{ me.name }}</bdi></span><i class="fas fa-chevron-down" aria-hidden="true"></i></summary>
+        <div class="menu">
+          <div class="menu-head"><b>{{ ('مدير النظام' if me.sysadmin else 'مستخدم') if ar else ('System administrator' if me.sysadmin else 'User') }}</b><small dir="ltr">{{ me.username }}</small></div>
+          <a href="#" data-go="settings"><i class="fas fa-key"></i> {{ 'تغيير كلمة المرور' if ar else 'Change password' }}</a>
+          <a href="#" id="installAppBtn" style="display:none"><i class="fas fa-download"></i> {{ 'تثبيت التطبيق' if ar else 'Install the app' }}</a>
+          <a href="/admin/logout?lang={{ lang }}" class="out"><i class="fas fa-right-from-bracket"></i> {{ 'تسجيل الخروج' if ar else 'Sign out' }}</a>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <div class="content">
+    <!-- ── الرئيسية ── -->
+    <div class="tab-panel active" id="tab-home">
+      <div class="home-hello">{{ 'لوحة التحكم' if ar else 'Control panel' }}</div>
+      <div class="home-sub">{{ 'كل رقم يفتح قائمة الطلبات مصفّاة بحالته.' if ar else 'Every number opens the requests list filtered by its status.' }}</div>
+      <div class="kpis">
+        <div class="kpi" data-stat="all" tabindex="0" role="button"><div class="n" id="stTotal">-</div><div class="l">{{ 'إجمالي الطلبات' if ar else 'All requests' }}</div></div>
+        <div class="kpi warn" data-stat="pending" tabindex="0" role="button"><div class="n" id="stPending">-</div><div class="l">{{ 'قيد المراجعة' if ar else 'Pending' }}</div></div>
+        <div class="kpi ok" data-stat="approved" tabindex="0" role="button"><div class="n" id="stApproved">-</div><div class="l">{{ 'معتمد' if ar else 'Approved' }}</div></div>
+        <div class="kpi bad" data-stat="rejected" tabindex="0" role="button"><div class="n" id="stRejected">-</div><div class="l">{{ 'مرفوض' if ar else 'Rejected' }}</div></div>
+        <div class="kpi info" data-stat="today" tabindex="0" role="button"><div class="n" id="stToday">-</div><div class="l">{{ 'حجوزات اليوم' if ar else 'Today' }}</div></div>
+        <div class="kpi grey" data-stat="week" tabindex="0" role="button"><div class="n" id="stWeek">-</div><div class="l">{{ 'هذا الأسبوع' if ar else 'This week' }}</div></div>
+      </div>
+      <div class="card"><div class="card-title"><i class="fas fa-forward"></i> {{ 'الحجوزات القادمة (7 أيام)' if ar else 'Upcoming bookings (7 days)' }}</div><div id="upcoming"></div></div>
+    </div>
+
+    <!-- ── طلبات الحجز ── -->
+    <div class="tab-panel" id="tab-bookings">
+      <div class="filter-bar" id="statusBar">
+        <button class="filter-btn active" data-status="all" type="button">{{ 'الكل' if ar else 'All' }}</button>
+        <button class="filter-btn" data-status="pending" type="button">{{ 'قيد المراجعة' if ar else 'Pending' }}</button>
+        <button class="filter-btn" data-status="approved" type="button">{{ 'معتمد' if ar else 'Approved' }}</button>
+        <button class="filter-btn" data-status="rejected" type="button">{{ 'مرفوض' if ar else 'Rejected' }}</button>
+        <button class="filter-btn" data-status="cancelled" type="button">{{ 'ملغي' if ar else 'Cancelled' }}</button>
+      </div>
+      <div id="bookingsBox"></div>
+    </div>
+
+    <!-- ── التقويم ── -->
+    <div class="tab-panel" id="tab-calview">
+      <div class="card">
+        <div class="cal-bar">
+          <div class="cal-nav">
+            <button class="icon-btn" type="button" id="aPrev" aria-label="{{ 'الشهر السابق' if ar else 'Previous month' }}"><i class="fas fa-chevron-{{ 'right' if ar else 'left' }}"></i></button>
+            <button class="icon-btn" type="button" id="aNext" aria-label="{{ 'الشهر التالي' if ar else 'Next month' }}"><i class="fas fa-chevron-{{ 'left' if ar else 'right' }}"></i></button>
+            <button class="btn btn-outline btn-sm" type="button" id="aToday">{{ 'اليوم' if ar else 'Today' }}</button>
+          </div>
+          <div class="cal-title" id="aTitle"></div>
+          <div class="cal-filters"><select id="aHall" aria-label="{{ 'تصفية حسب المبنى أو المرفق' if ar else 'Filter by building or facility' }}"></select></div>
+        </div>
+        <div class="legend"><span><i style="background:var(--approved)"></i>{{ 'معتمد' if ar else 'Approved' }}</span><span><i style="background:var(--pending)"></i>{{ 'قيد المراجعة' if ar else 'Pending' }}</span></div>
+        <div class="a-cal-grid" id="aGrid"></div>
+      </div>
+    </div>
+
+    <!-- ── غير متاح ── -->
+    <div class="tab-panel" id="tab-blocked">
+      <div class="card">
+        <div class="card-title"><i class="fas fa-ban"></i> {{ 'إضافة فترة غير متاحة' if ar else 'Add an unavailable period' }}</div>
+        <div class="form-grid quad">
+          <div class="form-group"><label for="blkStart">{{ 'من تاريخ' if ar else 'From date' }}</label><input type="date" id="blkStart"></div>
+          <div class="form-group"><label for="blkEnd">{{ 'إلى تاريخ' if ar else 'To date' }}</label><input type="date" id="blkEnd"></div>
+          <div class="form-group"><label for="blkFromT">{{ 'من الساعة (اختياري)' if ar else 'From (optional)' }}</label><input type="time" id="blkFromT" dir="ltr"></div>
+          <div class="form-group"><label for="blkToT">{{ 'إلى الساعة' if ar else 'To' }}</label><input type="time" id="blkToT" dir="ltr"></div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group"><label for="blkHall">{{ 'المبنى أو المرفق' if ar else 'Building or facility' }}</label><select id="blkHall"></select></div>
+          <div class="form-group"><label for="blkReason">{{ 'السبب' if ar else 'Reason' }}</label><input type="text" id="blkReason" maxlength="200"></div>
+        </div>
+        <button class="btn btn-primary" type="button" id="blkAdd"><i class="fas fa-plus"></i> {{ 'إضافة' if ar else 'Add' }}</button>
+      </div>
+      <div id="blockedBox"></div>
+    </div>
+
+    <!-- ── التقارير ── -->
+    <div class="tab-panel" id="tab-reports">
+      <div class="toolbar"><button class="btn btn-outline" type="button" onclick="window.print()"><i class="fas fa-print"></i> {{ 'طباعة' if ar else 'Print' }}</button></div>
+      <div class="form-grid">
+        <div class="card"><div class="card-title"><i class="fas fa-trophy"></i> {{ 'الأكثر حجزاً' if ar else 'Most booked' }}</div><div id="chartTop"></div></div>
+        <div class="card"><div class="card-title"><i class="fas fa-shapes"></i> {{ 'الحجوزات المعتمدة حسب النوع' if ar else 'Approved bookings by type' }}</div><div id="chartCat"></div></div>
+      </div>
+      <div class="card"><div class="card-title"><i class="fas fa-table"></i> {{ 'الحجوزات المعتمدة لكل مبنى حسب الشهر' if ar else 'Approved bookings per building by month' }}</div><div id="monthTable"></div></div>
+    </div>
+
+    <!-- ── المباني والمرافق ── -->
+    <div class="tab-panel" id="tab-halls">
+      <div class="toolbar"><button class="btn btn-primary" type="button" id="hallAdd"><i class="fas fa-plus"></i> {{ 'إضافة مبنى أو مرفق' if ar else 'Add a building or facility' }}</button></div>
+      <div id="hallsBox"></div>
+    </div>
+
+    <!-- ── جهات الاتصال ── -->
+    <div class="tab-panel" id="tab-contacts">
+      <div class="alert alert-info"><i class="fas fa-circle-info"></i> {{ 'اختر لكل جهة ما يصلها: إشعار الحجز الجديد (مع رابطي الموافقة والرفض أو للاطّلاع فقط)، وإشعار الاعتماد، والتعليقات، والملخص اليومي وتذكير اقتراب الحجز. ويمكن حصر الجهة بمبنى أو مرفق واحد.' if ar else 'Choose what each contact receives: new-booking notices (with approve and reject links, or read-only), approval notices, comments, the daily summary and the upcoming-booking reminder. A contact can be limited to one building or facility.' }}</div>
+      <div class="toolbar"><button class="btn btn-primary" type="button" id="ctAdd"><i class="fas fa-user-plus"></i> {{ 'إضافة جهة اتصال' if ar else 'Add a contact' }}</button>
+        <label class="btn btn-outline" style="cursor:pointer"><i class="fas fa-file-import"></i> {{ 'استيراد قائمة (CSV أو نص)' if ar else 'Import a list (CSV or text)' }}<input type="file" id="ctFile" accept=".csv,.txt" style="display:none"></label>
+        <a class="btn btn-outline" href="/api/admin/contacts/export"><i class="fas fa-file-export"></i> {{ 'تصدير' if ar else 'Export' }}</a></div>
+      <div id="contactsBox"></div>
+    </div>
+
+    <!-- ── الشريط الإخباري ── -->
+    <div class="tab-panel" id="tab-ticker">
+      <div class="card">
+        <div class="card-title"><i class="fas fa-bullhorn"></i> {{ 'الشريط الإخباري المتحرك' if ar else 'The scrolling news ticker' }}</div>
+        <label class="check-line"><input type="checkbox" id="tickerEnabled"> <span>{{ 'تفعيل الشريط على كل الصفحات' if ar else 'Show the ticker on every page' }}</span></label>
+        <label style="font-weight:700;display:block;margin:12px 0 6px">{{ 'محتوى الشريط (عربي)' if ar else 'Ticker content (Arabic)' }}</label>
+        <div id="tickerQuill" data-content style="background:#fff;min-height:120px"></div>
+        <div class="hint">{{ 'يمكنك تلوين النص وتنسيقه وإضافة روابط. كل سطر فقرة مستقلة في الشريط.' if ar else 'You can colour and format the text and add links. Each line is its own item in the ticker.' }}</div>
+        <label style="font-weight:700;display:block;margin:16px 0 6px">{{ 'محتوى الشريط (إنجليزي)' if ar else 'Ticker content (English)' }}</label>
+        <div id="tickerQuillEn" style="background:#fff;min-height:120px" dir="ltr"></div>
+        <div class="hint">{{ 'يظهر عند تصفح الموقع بالإنجليزية، وإن تُرك فارغاً عُرض المحتوى العربي.' if ar else 'Shown when the site is browsed in English; if empty the Arabic content is shown.' }}</div>
+        <div class="form-grid" style="margin-top:16px">
+          <div class="form-group"><label for="tickerSpeed">{{ 'السرعة (ثوانٍ لكل دورة)' if ar else 'Speed (seconds per loop)' }}</label><input type="number" id="tickerSpeed" min="5" max="180"><div class="hint">{{ 'رقم أصغر = حركة أسرع' if ar else 'A smaller number is faster' }}</div></div>
+          <div class="form-group"><label for="tickerRssUrl">{{ 'رابط RSS (اختياري)' if ar else 'RSS link (optional)' }}</label><input type="text" id="tickerRssUrl" dir="ltr" placeholder="https://example.org/feed.xml"></div>
+          <div class="form-group"><label for="tickerRssColor">{{ 'لون أخبار RSS' if ar else 'RSS text colour' }}</label><input type="color" id="tickerRssColor"></div>
+          <div class="form-group"><label for="tickerRssFontSize">{{ 'حجم خط أخبار RSS' if ar else 'RSS font size' }}</label><input type="number" id="tickerRssFontSize" min="13" max="40"></div>
+        </div>
+        <label class="check-line"><input type="checkbox" id="tickerRssBold"> <span>{{ 'خط عريض لأخبار RSS' if ar else 'Bold RSS items' }}</span></label>
+        <label class="check-line"><input type="checkbox" id="tickerLogoBetween"> <span>{{ 'إظهار الشعار بين فقرات الشريط' if ar else 'Show the logo between the items' }}</span></label>
+        <label class="check-line"><input type="checkbox" id="tickerPulse"> <span>{{ 'تأثير النبض (وميض)' if ar else 'Pulse effect (blinking)' }}</span></label>
+        <div class="form-group" id="tickerPulseRow" style="display:none;max-width:260px;margin-top:8px"><label for="tickerPulseSpeed">{{ 'سرعة النبض (ثوانٍ لكل ومضة)' if ar else 'Pulse speed (seconds per blink)' }}</label><input type="number" id="tickerPulseSpeed" min="0.3" max="10" step="0.1"></div>
+        <div class="form-grid" style="margin-top:14px">
+          <div class="form-group"><label for="tickerBgColor">{{ 'لون خلفية الشريط' if ar else 'Background colour' }}</label><input type="color" id="tickerBgColor"></div>
+          <div class="form-group"><label for="tickerBgOpacity">{{ 'شفافية الخلفية:' if ar else 'Background opacity:' }} <b id="tickerBgOpacityVal">0%</b></label><input type="range" id="tickerBgOpacity" min="0" max="100" step="5" style="width:100%"></div>
+          <div class="form-group"><label for="tickerTextColor">{{ 'لون النص' if ar else 'Text colour' }}</label><input type="color" id="tickerTextColor"></div>
+          <div class="form-group"><label for="tickerShadow">{{ 'ظل النص' if ar else 'Text shadow' }}</label><select id="tickerShadow"><option value="none">{{ 'بلا ظل' if ar else 'None' }}</option><option value="light">{{ 'ظل خفيف' if ar else 'Light' }}</option><option value="strong">{{ 'ظل قوي' if ar else 'Strong' }}</option></select></div>
+        </div>
+        <div class="action-btns" style="margin-top:16px"><button class="btn btn-primary" type="button" id="tickerSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ' if ar else 'Save' }}</button>
+          <a class="btn btn-outline" href="/calendar?lang={{ lang }}" target="_blank" rel="noopener"><i class="fas fa-eye"></i> {{ 'معاينة على الموقع' if ar else 'Preview on the site' }}</a></div>
+      </div>
+    </div>
+
+    <!-- ── الروابط المختصرة ── -->
+    <div class="tab-panel" id="tab-links">
+      <div class="alert alert-info"><i class="fas fa-circle-info"></i> {{ 'رابط قصير مثل acs.edjo.win/1 يحوّل الزائر إلى رابط طويل (ملف على OneDrive أو نموذج...). يُحسب عدد الضغطات.' if ar else 'A short link such as acs.edjo.win/1 sends the visitor to a long link (a OneDrive file, a form...). Clicks are counted.' }}</div>
+      <div class="toolbar"><button class="btn btn-primary" type="button" id="linkAdd"><i class="fas fa-plus"></i> {{ 'إضافة رابط' if ar else 'Add a link' }}</button></div>
+      <div id="linksBox"></div>
+    </div>
+
+    <!-- ── الأرشفة ── -->
+    <div class="tab-panel" id="tab-archive">
+      <div class="card" style="border:2px solid #d97706">
+        <div class="card-title" style="color:#92400e"><i class="fas fa-box-archive"></i> {{ 'أرشفة الحجوزات القديمة' if ar else 'Archive old bookings' }}</div>
+        <p class="hint" style="margin-bottom:12px">{{ 'لتخفيف حجم البيانات: حمِّل الحجوزات المنتهية قبل تاريخ معيّن في ملف، ثم احذفها من النظام. لا يشمل ذلك الطلبات قيد المراجعة. الحذف لا يُتراجع عنه، فتأكد من نجاح تحميل الملف أولاً.' if ar else 'To lighten the data: download the bookings that ended before a date as a file, then delete them from the system. Pending requests are never included. Deleting cannot be undone, so make sure the file downloaded first.' }}</p>
+        <div class="form-group" style="max-width:260px"><label for="arcDate">{{ 'الحجوزات المنتهية قبل تاريخ' if ar else 'Bookings that ended before' }}</label><input type="date" id="arcDate"></div>
+        <div class="action-btns"><button class="btn btn-outline" type="button" id="arcPreview"><i class="fas fa-magnifying-glass"></i> {{ 'معاينة' if ar else 'Preview' }}</button></div>
+        <div id="arcResult" style="margin-top:14px"></div>
+      </div>
+      {% if me.sysadmin %}
+      <div class="card"><div class="card-title"><i class="fas fa-file-zipper"></i> {{ 'نسخة كاملة من البيانات' if ar else 'A full copy of the data' }}</div>
+        <p class="hint" style="margin-bottom:10px">{{ 'ملف واحد فيه القاعدة وكل المرفقات لاسترجاع النظام كاملاً (لمدير النظام فقط).' if ar else 'One file with the database and every attachment, to restore the whole system (system administrator only).' }}</p>
+        <a class="btn btn-primary" href="/api/admin/full-export"><i class="fas fa-download"></i> {{ 'حمِّل نسخة كاملة' if ar else 'Download a full copy' }}</a></div>
+      {% endif %}
+    </div>
+
+    <!-- ── الإعدادات ── -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="card" data-perm="settings.identity">
+        <div class="card-title"><i class="fas fa-id-card"></i> {{ 'هوية المؤسسة' if ar else 'Organization identity' }}</div>
+        <div class="form-grid">
+          <div class="form-group"><label for="sOrgAr">{{ 'اسم المؤسسة (عربي)' if ar else 'Organization name (Arabic)' }}</label><input type="text" id="sOrgAr"></div>
+          <div class="form-group"><label for="sOrgEn">{{ 'اسم المؤسسة (إنجليزي)' if ar else 'Organization name (English)' }}</label><input type="text" id="sOrgEn" dir="ltr"></div>
+        </div>
+        <div class="form-group" style="max-width:200px"><label for="sAccent">{{ 'اللون الرئيسي' if ar else 'Main colour' }}</label><input type="color" id="sAccent"></div>
+        <div class="form-group"><label>{{ 'الشعار' if ar else 'Logo' }}</label>
+          <div class="logo-pick"><img id="sLogoImg" alt="{{ 'الشعار الحالي' if ar else 'Current logo' }}" style="display:none">
+            <div class="action-btns"><label class="btn btn-outline" style="cursor:pointer"><i class="fas fa-upload"></i> {{ 'رفع شعار' if ar else 'Upload a logo' }}<input type="file" id="sLogoFile" accept=".png,.jpg,.jpeg,.webp,.svg" style="display:none"></label>
+              <button class="btn btn-red" type="button" id="sLogoDel"><i class="fas fa-trash"></i> {{ 'إزالة الشعار' if ar else 'Remove the logo' }}</button></div></div>
+          <div class="hint">{{ 'يظهر الشعار في الصفحات والبريد؛ يُفضَّل شعار مربع بخلفية شفافة (PNG أو SVG).' if ar else 'The logo appears on the pages and in emails; a square logo with a transparent background (PNG or SVG) works best.' }}</div></div>
+        <button class="btn btn-primary" type="button" id="sIdentitySave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ الهوية' if ar else 'Save the identity' }}</button>
+      </div>
+      <div class="card" data-perm="settings.approval">
+        <div class="card-title"><i class="fas fa-circle-check"></i> {{ 'الاعتماد التلقائي' if ar else 'Automatic approval' }}</div>
+        <label class="check-line"><input type="checkbox" id="sAutoApprove"> <span>{{ 'اعتماد كل حجز جديد فور تقديمه (ما عدا المباني والمرافق التي تتطلب موافقة مسبقة). تصل الإشعارات كالمعتاد.' if ar else 'Approve every new booking as soon as it is submitted (except buildings and facilities that need prior approval). Notices are sent as usual.' }}</span></label>
+      </div>
+      <div class="card" data-perm="settings.reminders">
+        <div class="card-title"><i class="fas fa-bell"></i> {{ 'التذكيرات الآلية بالبريد' if ar else 'Automatic email reminders' }}</div>
+        <label class="check-line"><input type="checkbox" id="sRemindersOn"> <span>{{ 'تشغيل خدمة التذكيرات (مفتاح عام يوقف الأنواع كلها)' if ar else 'Turn the reminder service on (a master switch for all kinds)' }}</span></label>
+        <label class="check-line"><input type="checkbox" id="sRemindScheduled"> <span>{{ 'التذكيرات المحددة بوقت على الحجوزات (يحددها صاحب الحجز في نموذج الحجز)' if ar else 'Timed reminders on bookings (chosen by the applicant in the booking form)' }}</span></label>
+        <label class="check-line"><input type="checkbox" id="sSummaryOn"> <span>{{ 'ملخص يومي بحجوزات اليوم لجهات الاتصال المعنية' if ar else 'A daily summary of today’s bookings to the contacts concerned' }}</span></label>
+        <div class="form-grid" style="margin-top:10px;max-width:520px">
+          <div class="form-group"><label for="sSummaryTime">{{ 'وقت الملخص اليومي' if ar else 'Daily summary time' }}</label><input type="time" id="sSummaryTime" dir="ltr"></div>
+          <div class="form-group"><label for="sLead">{{ 'تذكير قبل بداية الحجز بـ (دقيقة)' if ar else 'Reminder before a booking starts (minutes)' }}</label><input type="number" id="sLead" min="0" max="1440" placeholder="{{ 'فارغ = بلا تذكير' if ar else 'empty = none' }}"></div>
+        </div>
+        <p class="hint" id="sRemindNote"></p>
+        <button class="btn btn-primary" type="button" id="sRemindSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ التذكيرات' if ar else 'Save the reminders' }}</button>
+      </div>
+      <div class="card"><div class="card-title"><i class="fas fa-envelope"></i> {{ 'البريد الإلكتروني' if ar else 'Email' }}</div><p class="hint" id="sMail"></p></div>
+      <div class="card">
+        <div class="card-title"><i class="fas fa-key"></i> {{ 'تغيير كلمة المرور' if ar else 'Change password' }}</div>
+        <div class="form-grid">
+          <div class="form-group"><label for="pwCur">{{ 'كلمة المرور الحالية' if ar else 'Current password' }}</label><input type="password" id="pwCur" dir="ltr" autocomplete="current-password"></div>
+          <div class="form-group"></div>
+          <div class="form-group"><label for="pwNew">{{ 'الجديدة (8 أحرف على الأقل)' if ar else 'New (at least 8 characters)' }}</label><input type="password" id="pwNew" dir="ltr" autocomplete="new-password"></div>
+          <div class="form-group"><label for="pwRep">{{ 'أعد كتابة الجديدة' if ar else 'Repeat the new one' }}</label><input type="password" id="pwRep" dir="ltr" autocomplete="new-password"></div>
+        </div>
+        <button class="btn btn-primary" type="button" id="pwSave"><i class="fas fa-floppy-disk"></i> {{ 'تغيير' if ar else 'Change' }}</button>
+      </div>
+    </div>
+
+    <!-- ── المستخدمون ── -->
+    <div class="tab-panel" id="tab-users">
+      <div class="toolbar"><button class="btn btn-primary" type="button" id="userAdd"><i class="fas fa-user-plus"></i> {{ 'إضافة مستخدم' if ar else 'Add a user' }}</button></div>
+      <div id="usersBox"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── نوافذ ── -->
+<div class="modal-overlay" id="mdHall"><div class="modal wide"><div class="modal-title" id="mdHallTitle"></div>
+  <input type="hidden" id="hId">
+  <div class="form-grid">
+    <div class="form-group"><label for="hNameAr">{{ 'الاسم (عربي)' if ar else 'Name (Arabic)' }} *</label><input type="text" id="hNameAr"></div>
+    <div class="form-group"><label for="hNameEn">{{ 'الاسم (إنجليزي)' if ar else 'Name (English)' }}</label><input type="text" id="hNameEn" dir="ltr"></div>
+    <div class="form-group"><label for="hCat">{{ 'النوع' if ar else 'Type' }}</label><select id="hCat">{% for c in categories %}<option value="{{ c.key }}">{{ c.ar if ar else c.en }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label for="hCode">{{ 'الرمز' if ar else 'Code' }}</label><input type="text" id="hCode" dir="ltr"></div>
+    <div class="form-group"><label for="hLocation">{{ 'الموقع' if ar else 'Location' }}</label><input type="text" id="hLocation"></div>
+    <div class="form-group"><label for="hCapacity">{{ 'السعة (عدد الأشخاص)' if ar else 'Capacity (people)' }}</label><input type="number" id="hCapacity" min="0" dir="ltr"></div>
+  </div>
+  <div class="form-group"><label for="hEquip">{{ 'المعدات والمرافق' if ar else 'Equipment and amenities' }}</label><textarea id="hEquip" rows="2"></textarea></div>
+  <div class="form-group"><label for="hDesc">{{ 'الوصف' if ar else 'Description' }}</label><textarea id="hDesc" rows="2"></textarea></div>
+  <div class="form-group"><label for="hNotes">{{ 'ملاحظات للمستخدم' if ar else 'Notes for the user' }}</label><textarea id="hNotes" rows="2"></textarea></div>
+  <label class="check-line"><input type="checkbox" id="hApproval"> <span>{{ 'يتطلب موافقة مسبقة (لا يُعتمد تلقائياً)' if ar else 'Needs prior approval (never auto-approved)' }}</span></label>
+  <label class="check-line"><input type="checkbox" id="hActive" checked> <span>{{ 'فعّال (يظهر في الحجز)' if ar else 'Active (shown in booking)' }}</span></label>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="hSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ' if ar else 'Save' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdBooking"><div class="modal wide"><div class="modal-title">{{ 'تعديل الحجز' if ar else 'Edit the booking' }} <span id="bkReq" dir="ltr"></span></div>
+  <div class="form-grid">
+    <div class="form-group"><label for="bkName">{{ 'الاسم' if ar else 'Name' }} *</label><input type="text" id="bkName"></div>
+    <div class="form-group"><label for="bkEmail">{{ 'البريد الإلكتروني' if ar else 'Email' }} *</label><input type="email" id="bkEmail" dir="ltr"></div>
+    <div class="form-group"><label for="bkPhone">{{ 'الهاتف' if ar else 'Phone' }}</label><input type="tel" id="bkPhone" dir="ltr"></div>
+    <div class="form-group"><label for="bkBehalf">{{ 'نيابة عن' if ar else 'On behalf of' }}</label><input type="text" id="bkBehalf"></div>
+  </div>
+  <div class="form-group"><label for="bkTitle">{{ 'عنوان المناسبة' if ar else 'Event title' }} *</label><input type="text" id="bkTitle"></div>
+  <div class="form-group"><label for="bkHall">{{ 'المبنى أو المرفق' if ar else 'Building or facility' }}</label><select id="bkHall"></select></div>
+  <div class="form-grid">
+    <div class="form-group"><label for="bkDate">{{ 'تاريخ البداية' if ar else 'Start date' }}</label><input type="date" id="bkDate"></div>
+    <div class="form-group"><label for="bkEndDate">{{ 'تاريخ الانتهاء' if ar else 'End date' }}</label><input type="date" id="bkEndDate"></div>
+    <div class="form-group"><label for="bkStart">{{ 'من الساعة' if ar else 'From' }}</label><input type="time" id="bkStart" dir="ltr"></div>
+    <div class="form-group"><label for="bkEnd">{{ 'إلى الساعة' if ar else 'To' }}</label><input type="time" id="bkEnd" dir="ltr"></div>
+  </div>
+  <label class="check-line"><input type="checkbox" id="bkFull"> <span>{{ 'يوم كامل' if ar else 'Full day' }}</span></label>
+  <div class="form-group" style="margin-top:10px"><label for="bkNotes">{{ 'ملاحظات' if ar else 'Notes' }}</label><textarea id="bkNotes" rows="3"></textarea></div>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="bkSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ وإبلاغ صاحب الطلب' if ar else 'Save and notify the applicant' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdAction"><div class="modal" style="max-width:480px"><div class="modal-title" id="actTitle"></div>
+  <input type="hidden" id="actReq"><input type="hidden" id="actKind">
+  <div class="form-group" id="actExtraRow"><label for="actExtra" id="actExtraLbl"></label><input type="text" id="actExtra" dir="ltr"></div>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="actOk"></button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdComments"><div class="modal wide"><div class="modal-title">{{ 'التعليقات' if ar else 'Comments' }} <span id="cmReq" dir="ltr"></span></div>
+  <div id="cmList" style="max-height:44vh;overflow:auto"></div>
+  <div class="form-group" id="cmForm"><label for="cmBody">{{ 'تعليق جديد (يصل جهات الاتصال المعنية)' if ar else 'New comment (sent to the contacts concerned)' }}</label><textarea id="cmBody" rows="3"></textarea></div>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="cmSend"><i class="fas fa-paper-plane"></i> {{ 'إرسال' if ar else 'Send' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إغلاق' if ar else 'Close' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdContact"><div class="modal wide"><div class="modal-title" id="ctTitle"></div>
+  <input type="hidden" id="ctId">
+  <div class="form-grid">
+    <div class="form-group"><label for="ctEmail">{{ 'البريد الإلكتروني' if ar else 'Email' }} *</label><input type="email" id="ctEmail" dir="ltr"></div>
+    <div class="form-group"><label for="ctName">{{ 'الاسم' if ar else 'Name' }}</label><input type="text" id="ctName"></div>
+  </div>
+  <div class="form-group"><label for="ctHall">{{ 'يخص' if ar else 'Concerns' }}</label><select id="ctHall"></select></div>
+  <div class="flag-grid">
+    <label class="check-line"><input type="checkbox" id="fNew"> <span>{{ 'إشعار الحجز الجديد' if ar else 'New-booking notice' }}</span></label>
+    <label class="check-line"><input type="checkbox" id="fRead"> <span>{{ 'للاطّلاع فقط (بلا رابطَي الموافقة والرفض)' if ar else 'Read-only (no approve and reject links)' }}</span></label>
+    <label class="check-line"><input type="checkbox" id="fApp"> <span>{{ 'إشعار الاعتماد' if ar else 'Approval notice' }}</span></label>
+    <label class="check-line"><input type="checkbox" id="fCom"> <span>{{ 'إشعار التعليقات' if ar else 'Comment notice' }}</span></label>
+    <label class="check-line"><input type="checkbox" id="fRem"> <span>{{ 'الملخص اليومي وتذكير اقتراب الحجز' if ar else 'Daily summary and upcoming-booking reminder' }}</span></label>
+  </div>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="ctSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ' if ar else 'Save' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdUser"><div class="modal wide"><div class="modal-title" id="uTitle"></div>
+  <input type="hidden" id="uId">
+  <div class="form-grid">
+    <div class="form-group"><label for="uName">{{ 'اسم المستخدم' if ar else 'Username' }} *</label><input type="text" id="uName" dir="ltr" autocomplete="off"></div>
+    <div class="form-group"><label for="uFull">{{ 'الاسم' if ar else 'Name' }}</label><input type="text" id="uFull"></div>
+    <div class="form-group"><label for="uEmail">{{ 'البريد الإلكتروني' if ar else 'Email' }}</label><input type="email" id="uEmail" dir="ltr"></div>
+    <div class="form-group"><label for="uPass">{{ 'كلمة المرور (فارغة = دون تغيير)' if ar else 'Password (empty = keep)' }}</label><input type="password" id="uPass" dir="ltr" autocomplete="new-password"></div>
+  </div>
+  <label class="check-line"><input type="checkbox" id="uSys"> <span>{{ 'مدير النظام (كل الصلاحيات وإدارة المستخدمين)' if ar else 'System administrator (every permission and user management)' }}</span></label>
+  <label class="check-line"><input type="checkbox" id="uActive" checked> <span>{{ 'حساب فعّال' if ar else 'Active account' }}</span></label>
+  <div class="perm-box" id="uPermBox" style="margin-top:12px">
+    <div class="action-btns" style="margin-bottom:8px"><span style="font-weight:800;color:var(--navy)">{{ 'الصلاحيات' if ar else 'Permissions' }}:</span>
+      <button type="button" class="btn btn-outline btn-sm" data-preset="supervisor">{{ 'مشرف حجوزات' if ar else 'Bookings supervisor' }}</button>
+      <button type="button" class="btn btn-outline btn-sm" data-preset="viewer">{{ 'مشاهد' if ar else 'Viewer' }}</button>
+      <button type="button" class="btn btn-outline btn-sm" data-preset="none">{{ 'بلا صلاحيات' if ar else 'None' }}</button></div>
+    <div class="perm-grid">{% for p in catalogue %}<label><input type="checkbox" class="perm" value="{{ p.key }}"> <span>{{ p.ar if ar else p.en }}</span></label>{% endfor %}</div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="uSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ' if ar else 'Save' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdLink"><div class="modal" style="max-width:560px"><div class="modal-title" id="lkTitle"></div>
+  <input type="hidden" id="lkId">
+  <div class="form-group"><label for="lkUrl">{{ 'الرابط الأصلي' if ar else 'Original link' }} *</label><input type="url" id="lkUrl" dir="ltr" placeholder="https://"></div>
+  <div class="form-grid">
+    <div class="form-group"><label for="lkSlug">{{ 'الاسم المختصر (فارغ = رقم تلقائي)' if ar else 'Short name (empty = next number)' }}</label><input type="text" id="lkSlug" dir="ltr" maxlength="60"></div>
+    <div class="form-group"><label for="lkNote">{{ 'ملاحظة' if ar else 'Note' }}</label><input type="text" id="lkNote" maxlength="300"></div>
+  </div>
+  <label class="check-line"><input type="checkbox" id="lkActive" checked> <span>{{ 'فعّال' if ar else 'Active' }}</span></label>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="lkSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ' if ar else 'Save' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdDay"><div class="modal"><div class="modal-title" id="dayTitle" dir="ltr" style="text-align:start"></div><div class="day-list" id="dayList"></div>
+  <div class="modal-footer"><button class="btn btn-outline" type="button" data-close>{{ 'إغلاق' if ar else 'Close' }}</button></div></div></div>
+
+<div class="toast" id="toast" role="status"></div>
+<script>
+  window.ME = {{ me|tojson }};
+  window.CSRF = {{ csrf|tojson }};
+  window.PRESETS = {{ presets|tojson }};
+  window.CATEGORIES = {{ categories|tojson }};
+</script>
+<script src="https://cdn.quilljs.com/1.3.6/quill.min.js"></script>
+<script src="{{ asset('js/table.js') }}"></script>
+<script src="{{ asset('js/admin.js') }}"></script>
+</body>
+</html>

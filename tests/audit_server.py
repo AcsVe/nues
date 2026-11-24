@@ -33,7 +33,9 @@ with app.app_context():
              code='H001', capacity='120', equipment=T('جهاز عرض، سبورة ذكية', 'Projector, smart board'), active=True),
         Hall(name_ar=T('قاعة الاجتماعات', 'Meeting Room'), name_en='Meeting Room', location=T('الطابق الثاني', 'Second floor'),
              code='H002', capacity='30', equipment=T('شاشة، ميكروفون', 'Screen, microphone'), requires_approval=True, active=True),
-        Hall(name_ar=T('المسرح', 'Theater'), name_en='Theater', code='H003', capacity='300', active=False)]
+        Hall(name_ar=T('المسرح', 'Theater'), name_en='Theater', code='H003', capacity='300', active=True, category='theater'),
+        Hall(name_ar=T('الملعب الرئيسي', 'Main Field'), name_en='Main Field', code='F001', capacity='60', active=True, category='field'),
+        Hall(name_ar=T('الصالة الرياضية', 'Sports Hall'), name_en='Sports Hall', code='G001', capacity='80', active=False, category='gym')]
     db.session.add_all(halls)
     db.session.flush()
     names = [T('سامي خالد', 'Sami Khaled'), T('ليلى أحمد', 'Laila Ahmad'), T('منى سالم', 'Mona Salem')]
@@ -48,9 +50,13 @@ with app.app_context():
             reject_reason=T('القاعة محجوزة', 'The hall is taken') if s == 'rejected' else None))
     db.session.add(BlockedPeriod(start_date=date.today() + timedelta(days=9), end_date=date.today() + timedelta(days=10),
                                  hall_name=halls[0].name_ar, reason=T('صيانة القاعة', 'Hall maintenance')))
-    db.session.add(Contact(email='head@example.org', name=T('رئيس الجمعية', 'Society president')))
+    db.session.add(Contact(email='head@example.org', name=T('رئيس الجمعية', 'Society president'), notify_new=True, notify_approved=True,
+                           notify_staff_reminder=True, hall_name=halls[0].name_ar))
+    from utils.ticker_utils import set_ticker_config
+    set_ticker_config({'enabled': True, 'html': '<p>تعلن الجمعية عن مواعيد الفعاليات القادمة</p>',
+                       'htmlEn': '<p>The society announces the coming events</p>', 'speedSeconds': 25})
     db.session.add(AdminUser(username='editor', name=T('محرر', 'Editor'), email='editor@example.org',
-                             password_hash=hash_password('editor-pass-123'), role='admin', active=True))
+                             password_hash=hash_password('editor-pass-123'), role='user', active=True, perms='bookings.view,bookings.manage,calendar,reports'))
     db.session.commit()
 
 from werkzeug.serving import make_server  # noqa: E402

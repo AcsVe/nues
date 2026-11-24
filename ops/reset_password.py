@@ -32,7 +32,8 @@ with app.app_context():
     if len(pw) < 8 or pw != getpass.getpass('Type it again: '):
         sys.exit('Too short or not matching')
     if not user:
-        user = AdminUser(username=name, name=name, role='admin', active=True, password_hash=hash_password(pw))
+        user = AdminUser(username=name, name=name, role='admin', active=True, password_hash=hash_password(pw),
+                         is_sysadmin=AdminUser.query.filter_by(is_sysadmin=True).first() is None)
         db.session.add(user)
     else:
         user.password_hash = hash_password(pw)     # تغيير الهاش يُخرج الجلسات المفتوحة لهذا الحساب

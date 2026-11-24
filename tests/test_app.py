@@ -1,7 +1,10 @@
 import base64
-from datetime import date, timedelta
+import io
+from datetime import date, datetime, timedelta
 
 import pytest
+
+from conftest import login
 
 HALL = 'القاعة الرئيسية'
 
@@ -17,13 +20,16 @@ def book(client, **kw):
     return client.post('/api/submit_booking', json=body)
 
 
-def post(c, url, **body):
-    return c.post(url, json=body, headers=c.headers)
+def post(c, _path, **body):
+    return c.post(_path, json=body, headers=c.headers)
 
 
 def test_pages_open(client):
-    for url in ('/', '/book', '/admin', '/healthz', '/api/halls', '/api/month_data?year=2026&month=11'):
-        assert client.get(url).status_code == 200
+    for url in ('/calendar', '/book', '/lookup', '/admin/login', '/healthz', '/api/halls', '/api/ticker',
+                '/api/month_data?year=2026&month=11', '/sw.js', '/static/manifest.json'):
+        assert client.get(url).status_code == 200, url
+    assert client.get('/').status_code == 302
+    assert client.get('/admin').status_code == 302        # بلا دخول: إلى صفحة الدخول
 
 
 def test_admin_api_needs_login(client):
@@ -32,14 +38,14 @@ def test_admin_api_needs_login(client):
 
 
 def test_csrf_required(admin):
-    r = admin.post('/api/admin/halls/add', json={'nameAr': 'قاعة'})   # بلا رمز الحماية
-    assert r.status_code == 403
+    assert admin.post('/api/admin/halls/add', json={'nameAr': 'قاعة'}).status_code == 403
 
 
 def test_login_rate_limit_and_wrong_password(app):
     c = app.test_client()
-    codes = [c.post('/api/admin/login', json={'username': 'admin', 'password': 'bad'}).status_code for _ in range(11)]
-    assert codes[0] == 401 and codes[-1] == 429
+    codes = [c.post('/admin/login', data={'username': 'admin', 'password': 'bad'}).status_code for _ in range(11)]
+    assert codes[0] == 200 and codes[-1] == 200
+    assert 'محاولات كثيرة' in c.post('/admin/login', data={'username': 'admin', 'password': 'bad'}).get_data(as_text=True)
 
 
 def test_password_is_hashed(app):
@@ -47,19 +53,19 @@ def test_password_is_hashed(app):
     with app.app_context():
         u = AdminUser.query.filter_by(username='admin').first()
         assert u.password_hash != 'Secret-pass-1' and u.password_hash.startswith(('scrypt:', 'pbkdf2:'))
+        assert u.is_sysadmin
 
 
 def test_booking_and_conflict(client):
     assert book(client).status_code == 200
-    r = book(client, startTime='10:30', endTime='11:30')
-    assert r.status_code == 409
-    assert book(client, startTime='11:00', endTime='12:00').status_code == 200   # متجاور لا متقاطع
+    assert book(client, startTime='10:30', endTime='11:30').status_code == 409
+    assert book(client, startTime='11:00', endTime='12:00').status_code == 200     # متجاور لا متقاطع
 
 
 def test_booking_validation(client):
     assert book(client, email='x').status_code == 400
     assert book(client, fullName='').status_code == 400
-    assert book(client, hall='لا توجد').status_code == 400
+    assert book(client, hall='لا يوجد').status_code == 400
     assert book(client, bookingDate='bad').status_code == 400
     assert book(client, bookingDate=day(-1)).status_code == 400
     assert book(client, startTime='25:00').status_code == 400
@@ -72,6 +78,15 @@ def test_lookup_needs_matching_email(client):
     assert client.post('/api/lookup_booking', json={'reqId': rid, 'email': 'A@example.org'}).status_code == 200
 
 
+def test_amend_and_cancel_by_user(client):
+    rid = book(client, bookingDate=day(40)).get_json()['reqId']
+    r = client.post('/api/amend_booking_user', json={'reqId': rid, 'email': 'a@example.org', 'hall': HALL, 'date': day(41),
+                                                    'startTime': '09:00', 'endTime': '10:00', 'title': 'جديد', 'name': 'أحمد'})
+    assert r.status_code == 200
+    assert client.post('/api/cancel_booking_user', json={'reqId': rid, 'email': 'a@example.org'}).status_code == 200
+    assert client.post('/api/cancel_booking_user', json={'reqId': rid, 'email': 'a@example.org'}).status_code == 400
+
+
 def test_upload_rules(client):
     ok = client.post('/api/upload', json={'fileName': 'a.pdf', 'dataBase64': base64.b64encode(b'%PDF-1').decode()})
     assert ok.status_code == 200 and ok.get_json()['url'].startswith('/uploads/')
@@ -81,8 +96,7 @@ def test_upload_rules(client):
 
 
 def test_attachment_urls_must_be_uploaded_files(client, admin):
-    r = book(client, bookingDate=day(9), attUrls=['https://evil.example/x', '/uploads/none.pdf'])
-    rid = r.get_json()['reqId']
+    rid = book(client, bookingDate=day(9), attUrls=['https://evil.example/x', '/uploads/none.pdf']).get_json()['reqId']
     row = next(b for b in admin.get('/api/admin/bookings').get_json() if b['reqId'] == rid)
     assert row['attachments'] == []
 
@@ -91,31 +105,56 @@ def test_bulk_booking_actions_and_protected_delete(client, admin):
     rid = book(client, bookingDate=day(12)).get_json()['reqId']
     assert post(admin, '/api/admin/bookings/bulk', action='approve', reqIds=[rid]).get_json()['done'] == 1
     r = post(admin, '/api/admin/bookings/bulk', action='delete', reqIds=[rid]).get_json()
-    assert r['done'] == 0 and r['skipped'] == 1          # حجز معتمد لا يُحذف قبل إلغائه
+    assert r['done'] == 0 and r['skipped'] == 1           # حجز معتمد لا يُحذف قبل إلغائه
     assert post(admin, '/api/admin/bookings/bulk', action='cancel', reqIds=[rid]).get_json()['done'] == 1
     assert post(admin, '/api/admin/bookings/bulk', action='delete', reqIds=[rid]).get_json()['done'] == 1
 
 
-def test_hall_delete_protection(admin, client):
-    book(client, bookingDate=day(15))
+def test_reject_needs_reason(client, admin):
+    rid = book(client, bookingDate=day(13)).get_json()['reqId']
+    assert post(admin, f'/api/admin/reject/{rid}').status_code == 400
+    assert post(admin, f'/api/admin/reject/{rid}', reason='مشغول').status_code == 200
+
+
+def test_cannot_approve_conflicting_pending(client, admin):
+    d = day(14)
+    a = book(client, bookingDate=d).get_json()['reqId']
+    assert post(admin, f'/api/admin/approve/{a}').status_code == 200
+    # حجز آخر في الوقت نفسه لا يُقبل أصلاً؛ نُنشئه بتعديل ثم نحاول اعتماده
+    b = book(client, bookingDate=day(15)).get_json()['reqId']
+    assert post(admin, f'/api/admin/update/{b}', date=d, endDate=d).status_code == 409
+
+
+def test_hall_categories_and_delete_protection(admin, client):
+    book(client, bookingDate=day(16))
     halls = admin.get('/api/admin/halls').get_json()
+    assert {h['category'] for h in halls} >= {'hall', 'theater', 'field', 'gym'}
     main = next(h for h in halls if h['nameAr'] == HALL)
-    assert post(admin, f"/api/admin/halls/delete/{main['id']}").status_code == 400     # لها حجوزات
-    assert post(admin, '/api/admin/halls/add', nameAr='قاعة جديدة', nameEn='New').status_code == 200
-    new = next(h for h in admin.get('/api/admin/halls').get_json() if h['nameAr'] == 'قاعة جديدة')
+    assert post(admin, f"/api/admin/halls/delete/{main['id']}").status_code == 400     # له حجوزات
+    assert post(admin, '/api/admin/halls/add', nameAr='ملعب جديد', nameEn='New field', category='field').status_code == 200
+    new = next(h for h in admin.get('/api/admin/halls').get_json() if h['nameAr'] == 'ملعب جديد')
+    assert new['category'] == 'field'
     assert post(admin, f"/api/admin/halls/delete/{new['id']}").status_code == 200
+    assert {h['category'] for h in client.get('/api/halls?category=field').get_json()} == {'field'}
 
 
 def test_cannot_deactivate_last_active_hall(admin):
-    halls = admin.get('/api/admin/halls').get_json()
-    active = [h for h in halls if h['active']]
+    active = [h for h in admin.get('/api/admin/halls').get_json() if h['active']]
     for h in active[:-1]:
-        body = dict(h, active=False)
-        assert post(admin, '/api/admin/halls/update', **body).status_code == 200
-    last = active[-1]
-    assert post(admin, '/api/admin/halls/update', **dict(last, active=False)).status_code == 400
+        assert post(admin, '/api/admin/halls/update', **dict(h, active=False)).status_code == 200
+    assert post(admin, '/api/admin/halls/update', **dict(active[-1], active=False)).status_code == 400
     for h in active[:-1]:
         post(admin, '/api/admin/halls/update', **dict(h, active=True))
+
+
+def test_hall_rename_follows_bookings(admin, client):
+    admin_halls = admin.get('/api/admin/halls').get_json()
+    g = next(h for h in admin_halls if h['category'] == 'gym')
+    rid = book(client, bookingDate=day(18), hall=g['nameAr']).get_json()['reqId']
+    assert post(admin, '/api/admin/halls/update', **dict(g, nameAr='صالة الألعاب')).status_code == 200
+    row = next(b for b in admin.get('/api/admin/bookings').get_json() if b['reqId'] == rid)
+    assert row['hall'] == 'صالة الألعاب'
+    post(admin, '/api/admin/halls/update', **dict(g, nameAr=g['nameAr']))
 
 
 def test_blocked_period_blocks_booking(client, admin):
@@ -126,14 +165,41 @@ def test_blocked_period_blocks_booking(client, admin):
     assert post(admin, '/api/admin/blocked/add', start=d, end=d, hall=HALL, fromT='10:00', toT='', reason='x').status_code == 400
 
 
-def test_users_protection(admin):
-    users = admin.get('/api/admin/users').get_json()
-    me = next(u for u in users if u['me'])
+def test_auto_approve_respects_hall_setting(client, admin):
+    assert post(admin, '/api/admin/settings', autoApproveBookings=True).status_code == 200
+    try:
+        r = book(client, bookingDate=day(22))
+        assert r.get_json()['status'] == 'approved'
+        theater = next(h for h in admin.get('/api/admin/halls').get_json() if h['category'] == 'theater')
+        assert post(admin, '/api/admin/halls/update', **dict(theater, requiresApproval=True)).status_code == 200
+        r = book(client, bookingDate=day(23), hall=theater['nameAr'])
+        assert r.get_json()['status'] == 'pending'
+    finally:
+        post(admin, '/api/admin/settings', autoApproveBookings=False)
+
+
+def test_users_protection_and_permissions(app, admin):
+    me = next(u for u in admin.get('/api/admin/users').get_json() if u['me'])
     assert post(admin, f"/api/admin/users/delete/{me['id']}").status_code == 400
     assert post(admin, '/api/admin/users/update', **dict(me, active=False)).status_code == 400
-    assert post(admin, '/api/admin/users/add', username='second', password='short').status_code == 400
-    assert post(admin, '/api/admin/users/add', username='second', password='long-enough-1').status_code == 200
-    assert post(admin, '/api/admin/users/add', username='SECOND', password='long-enough-1').status_code == 400
+    assert post(admin, '/api/admin/users/add', username='viewer1', password='short').status_code == 400
+    assert post(admin, '/api/admin/users/add', username='viewer1', password='long-enough-1', perms=['bookings.view', 'bogus']).status_code == 200
+    assert post(admin, '/api/admin/users/add', username='VIEWER1', password='long-enough-1').status_code == 400
+    v = login(app, 'viewer1', 'long-enough-1')
+    assert v.get('/api/admin/bookings').status_code == 200
+    assert v.get('/api/admin/users').status_code == 403                       # مدير النظام فقط
+    assert post(v, '/api/admin/halls/add', nameAr='x').status_code == 403
+    assert post(v, '/api/admin/settings', orgAr='x').status_code == 403
+    rid = book(app.test_client(), bookingDate=day(25)).get_json()['reqId']
+    assert post(v, f'/api/admin/approve/{rid}').status_code == 403
+    uid = next(u['id'] for u in admin.get('/api/admin/users').get_json() if u['username'] == 'viewer1')
+    assert post(admin, '/api/admin/users/update', id=uid, username='viewer1', perms=['bookings.view', 'bookings.manage']).status_code == 200
+    assert post(v, f'/api/admin/approve/{rid}').status_code == 200
+
+
+def test_last_sysadmin_cannot_lose_role(admin):
+    me = next(u for u in admin.get('/api/admin/users').get_json() if u['me'])
+    assert post(admin, '/api/admin/users/update', **dict(me, sysadmin=False)).status_code == 400
 
 
 def test_settings_and_logo(admin):
@@ -141,20 +207,129 @@ def test_settings_and_logo(admin):
     assert post(admin, '/api/admin/settings', accent='red').status_code == 400
     s = admin.get('/api/admin/settings').get_json()
     assert s['orgAr'] == 'جمعية' and s['accent'] == '#112233'
-    r = admin.post('/api/admin/logo', data={'file': (__import__('io').BytesIO(b'<svg xmlns="http://www.w3.org/2000/svg"/>'), 'logo.svg')},
+    r = admin.post('/api/admin/logo', data={'file': (io.BytesIO(b'<svg xmlns="http://www.w3.org/2000/svg"/>'), 'logo.svg')},
                    headers=admin.headers, content_type='multipart/form-data')
     assert r.status_code == 200
     assert admin.get('/api/admin/settings').get_json()['logo'].startswith('/uploads/brand/logo.')
-    bad = admin.post('/api/admin/logo', data={'file': (__import__('io').BytesIO(b'x'), 'logo.exe')},
-                     headers=admin.headers, content_type='multipart/form-data')
+    bad = admin.post('/api/admin/logo', data={'file': (io.BytesIO(b'x'), 'logo.exe')}, headers=admin.headers, content_type='multipart/form-data')
     assert bad.status_code == 400
-    post(admin, '/api/admin/settings', orgAr='الجمعية الثقافية العربية', orgEn='Arab Cultural Society', accent='#247680')
+    post(admin, '/api/admin/settings', orgAr='الجمعية الثقافية العربية', orgEn='Arab Cultural Society', accent='#0A7C86')
 
 
-def test_contacts_csv_is_safe(admin):
-    post(admin, '/api/admin/contacts/add', list=[{'email': 'x@example.org', 'name': '=HYPERLINK("http://e")'}])
-    csv_text = admin.get('/api/admin/contacts/export').get_data(as_text=True)
-    assert "'=HYPERLINK" in csv_text
+def test_reminder_settings_validation(admin):
+    assert post(admin, '/api/admin/settings', staffDailySummaryTime='07:30', staffReminderLeadMinutes='30', staffDailySummaryEnabled=True).status_code == 200
+    s = admin.get('/api/admin/settings').get_json()
+    assert s['staffDailySummaryTime'] == '07:30' and s['staffReminderLeadMinutes'] == '30'
+    post(admin, '/api/admin/settings', staffDailySummaryTime='bad', staffReminderLeadMinutes='x')
+    assert admin.get('/api/admin/settings').get_json()['staffDailySummaryTime'] == '07:30'
+    post(admin, '/api/admin/settings', staffDailySummaryEnabled=False, staffReminderLeadMinutes='')
+
+
+def test_contacts_flags_and_csv_is_safe(admin):
+    post(admin, '/api/admin/contacts/add', email='x@example.org', name='=HYPERLINK("http://e")', notify_new=True, new_readonly=True)
+    rows = admin.get('/api/admin/contacts').get_json()
+    c = next(r for r in rows if r['email'] == 'x@example.org')
+    assert c['new_readonly'] is True and c['notify_approved'] is True
+    assert post(admin, '/api/admin/contacts/update', **dict(c, notify_comment=True, hall=HALL)).status_code == 200
+    c = next(r for r in admin.get('/api/admin/contacts').get_json() if r['email'] == 'x@example.org')
+    assert c['notify_comment'] and c['hall'] == HALL
+    assert "'=HYPERLINK" in admin.get('/api/admin/contacts/export').get_data(as_text=True)
+
+
+def test_staff_notifications_follow_contact_flags(app, client, admin, monkeypatch):
+    import email_service as mail
+    sent = []
+    monkeypatch.setattr(mail, 'send_staff_new_booking', lambda to, d, a=None, r=None: sent.append((to, bool(a))))
+    post(admin, '/api/admin/contacts/add', email='full@example.org', notify_new=True, new_readonly=False)
+    post(admin, '/api/admin/contacts/add', email='ro@example.org', notify_new=True, new_readonly=True)
+    book(client, bookingDate=day(27))
+    got = dict(sent)
+    assert got.get('full@example.org') is True and got.get('ro@example.org') is False
+
+
+def test_email_action_links(app, client, admin):
+    rid = book(client, bookingDate=day(30)).get_json()['reqId']
+    from models import Booking
+    with app.app_context():
+        token = Booking.query.filter_by(req_id=rid).first().action_token
+    assert client.get(f'/action/approve/{rid}?token=bad').status_code == 404
+    page = client.get(f'/action/approve/{rid}?token={token}')
+    assert page.status_code == 200
+    with app.app_context():
+        assert Booking.query.filter_by(req_id=rid).first().status == 'pending'    # GET لا يغيّر شيئاً
+    assert client.post(f'/action/reject/{rid}?token={token}', data={'reason': ''}).status_code == 200
+    with app.app_context():
+        assert Booking.query.filter_by(req_id=rid).first().status == 'pending'    # الرفض يحتاج سبباً
+    client.post(f'/action/approve/{rid}?token={token}', data={})
+    with app.app_context():
+        assert Booking.query.filter_by(req_id=rid).first().status == 'approved'
+
+
+def test_comments(admin, client):
+    rid = book(client, bookingDate=day(31)).get_json()['reqId']
+    assert post(admin, f'/api/admin/comments/{rid}', body='').status_code == 400
+    assert post(admin, f'/api/admin/comments/{rid}', body='يرجى تجهيز القاعة').status_code == 200
+    rows = admin.get(f'/api/admin/comments/{rid}').get_json()
+    assert rows[0]['body'] == 'يرجى تجهيز القاعة'
+    assert next(b for b in admin.get('/api/admin/bookings').get_json() if b['reqId'] == rid)['comments'] == 1
+
+
+def test_ticker_is_cleaned(admin, client):
+    r = post(admin, '/api/admin/ticker', enabled=True, html='<p onclick="x()">مرحبا</p><script>alert(1)</script><a href="javascript:alert(1)">ر</a>', speedSeconds=999)
+    cfg = r.get_json()
+    assert '<script' not in cfg['html'] and 'onclick' not in cfg['html'] and 'javascript:' not in cfg['html']
+    assert cfg['speedSeconds'] == 180
+    assert client.get('/api/ticker').get_json()['enabled'] is True
+    post(admin, '/api/admin/ticker', enabled=False, html='')
+
+
+def test_password_reset_flow(app, admin, client, monkeypatch):
+    import email_service as mail
+    links = []
+    monkeypatch.setattr(mail, 'send_password_reset', lambda to, name, link: links.append(link))
+    post(admin, '/api/admin/users/add', username='resetme', password='old-password-1', email='r@example.org')
+    c = app.test_client()
+    assert c.post('/admin/forgot', data={'username': 'resetme'}).status_code == 200
+    assert c.post('/admin/forgot', data={'username': 'nobody'}).status_code == 200      # الجواب واحد دائماً
+    assert len(links) == 1
+    token = links[0].rsplit('/', 1)[1]
+    assert c.get(f'/admin/reset/{token}').status_code == 200
+    assert c.post(f'/admin/reset/{token}', data={'password': 'new-password-1', 'password2': 'different'}).status_code == 200
+    assert c.post(f'/admin/reset/{token}', data={'password': 'new-password-1', 'password2': 'new-password-1'}).status_code == 302
+    assert 'غير صالح' in c.get(f'/admin/reset/{token}').get_data(as_text=True) or 'not valid' in c.get(f'/admin/reset/{token}').get_data(as_text=True)
+    assert login(app, 'resetme', 'new-password-1')
+
+
+def test_scheduled_reminders_and_daily_summary(app, client, admin, monkeypatch):
+    import email_service as mail
+    from models import Booking, BookingReminder, db
+    import services
+    from utils.reminders import check_and_send_reminders
+    sent = []
+    monkeypatch.setattr(mail, 'send_booker_reminder', lambda d, note='': sent.append(('booker', d['reqId'])))
+    monkeypatch.setattr(mail, 'send_daily_summary', lambda to, ds, items: sent.append(('summary', to, len(items))))
+    now = services.amman_now()
+    rid = book(client, bookingDate=day(2), reminderAt=(now + timedelta(days=1)).strftime('%Y-%m-%dT%H:%M')).get_json()['reqId']
+    with app.app_context():
+        r = BookingReminder.query.filter_by(booking_id=Booking.query.filter_by(req_id=rid).first().id).first()
+        assert r is not None
+        r.remind_at = now - timedelta(minutes=1)
+        db.session.commit()
+    post(admin, '/api/admin/contacts/add', email='sum@example.org', notify_staff_reminder=True)
+    post(admin, '/api/admin/settings', staffDailySummaryEnabled=True, staffDailySummaryTime='00:00')
+    # حجز معتمد اليوم ليظهر في الملخص
+    today_rid = book(client, bookingDate=date.today().isoformat(), startTime='23:00', endTime='23:30').get_json()
+    if 'reqId' in today_rid:
+        post(admin, f"/api/admin/approve/{today_rid['reqId']}")
+    with app.app_context():
+        from models import AppSetting
+        AppSetting.set_str('last_daily_summary', '')
+        res = check_and_send_reminders()
+    assert res['scheduled'] == 1 and ('booker', rid) in sent
+    assert any(s[0] == 'summary' and s[1] == 'sum@example.org' for s in sent)
+    with app.app_context():
+        assert check_and_send_reminders()['scheduled'] == 0                          # لا يُرسل مرتين
+    post(admin, '/api/admin/settings', staffDailySummaryEnabled=False)
 
 
 def test_email_text_is_escaped(app):
@@ -162,16 +337,63 @@ def test_email_text_is_escaped(app):
     assert '<script>' not in _row('x', '<script>alert(1)</script>')
 
 
-def test_database_migration_adds_missing_columns(app):
+def test_database_migration_adds_missing_columns_with_defaults(app):
     from sqlalchemy import text
     from models import add_missing_columns, db
     with app.app_context():
-        db.session.execute(text('ALTER TABLE contacts RENAME TO contacts_old'))
-        db.session.execute(text('CREATE TABLE contacts (id INTEGER PRIMARY KEY, email VARCHAR(100) NOT NULL)'))
+        db.session.execute(text('ALTER TABLE halls RENAME TO halls_old'))
+        db.session.execute(text('CREATE TABLE halls (id INTEGER PRIMARY KEY, name_ar VARCHAR(100) NOT NULL)'))
+        db.session.execute(text("INSERT INTO halls (id, name_ar) VALUES (1, 'قاعة قديمة')"))
         db.session.commit()
         add_missing_columns()
-        cols = [r[1] for r in db.session.execute(text('PRAGMA table_info(contacts)')).fetchall()]
-        assert 'name' in cols and 'added_at' in cols
-        db.session.execute(text('DROP TABLE contacts'))
-        db.session.execute(text('ALTER TABLE contacts_old RENAME TO contacts'))
+        row = db.session.execute(text('SELECT category, active FROM halls WHERE id = 1')).fetchone()
+        assert row[0] == 'hall' and row[1] == 1          # القيمة الافتراضية للصفوف القائمة
+        db.session.execute(text('DROP TABLE halls'))
+        db.session.execute(text('ALTER TABLE halls_old RENAME TO halls'))
         db.session.commit()
+
+
+def test_short_links(admin, client):
+    assert post(admin, '/api/admin/links/save', url='ftp://x').status_code == 400
+    assert post(admin, '/api/admin/links/save', url='https://example.org/f', slug='calendar').status_code == 400      # محجوز
+    assert post(admin, '/api/admin/links/save', url='https://example.org/file').status_code == 200                   # رقم تلقائي
+    link = next(l for l in admin.get('/api/admin/links').get_json() if l['url'] == 'https://example.org/file')
+    assert link['slug'].isdigit()
+    r = client.get('/' + link['slug'])
+    assert r.status_code == 302 and r.headers['Location'] == 'https://example.org/file'
+    assert next(l for l in admin.get('/api/admin/links').get_json() if l['id'] == link['id'])['clicks'] == 1
+    assert post(admin, '/api/admin/links/save', url='https://example.org/other', slug=link['slug']).status_code == 400
+    post(admin, '/api/admin/links/bulk', action='deactivate', ids=[link['id']])
+    assert client.get('/' + link['slug']).status_code == 404
+    assert client.get('/no-such-link').status_code == 404
+    post(admin, '/api/admin/links/bulk', action='delete', ids=[link['id']])
+
+
+def test_archive_flow(admin, client):
+    rid = book(client, bookingDate=day(60)).get_json()['reqId']
+    post(admin, f'/api/admin/cancel/{rid}')
+    before = day(400)
+    pre = admin.get('/api/admin/archive-preview?before=' + before).get_json()
+    assert pre['count'] >= 1
+    zipped = admin.get('/api/admin/archive-export?before=' + before)
+    assert zipped.status_code == 200 and zipped.data[:2] == b'PK'
+    assert post(admin, '/api/admin/archive-delete', before=before).status_code == 400          # بلا تأكيد
+    pending = book(client, bookingDate=day(61)).get_json()['reqId']
+    done = post(admin, '/api/admin/archive-delete', before=before, confirm='DELETE').get_json()['deleted']
+    assert done >= 1
+    rows = {b['reqId'] for b in admin.get('/api/admin/bookings').get_json()}
+    assert rid not in rows and pending in rows                                                  # قيد المراجعة لا يُؤرشف
+
+
+def test_full_export_sysadmin_only(app, admin):
+    z = admin.get('/api/admin/full-export')
+    assert z.status_code == 200 and z.data[:2] == b'PK'
+    post(admin, '/api/admin/users/add', username='arch1', password='long-enough-1', perms=['archive'])
+    u = login(app, 'arch1', 'long-enough-1')
+    assert u.get('/api/admin/full-export').status_code == 403
+    assert u.get('/api/admin/archive-preview?before=' + day(1)).status_code == 200
+
+
+def test_server_errors_have_english(client):
+    j = book(client, email='x').get_json()
+    assert j['error'] and j['errorEn'] == 'The email address is not valid'

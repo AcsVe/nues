@@ -1,0 +1,30 @@
+{% extends 'base_public.html' %}
+{% block title %}{{ 'إجراء على حجز' if lang == 'ar' else 'Booking action' }}{% endblock %}
+{% block content %}
+{% set ar = lang == 'ar' %}
+<div class="card form-card" style="max-width:560px">
+  <div class="card-title"><i class="fas fa-{{ 'circle-check' if kind == 'approve' else 'circle-xmark' }}"></i> {{ ('موافقة على الحجز' if kind == 'approve' else 'رفض الحجز') if ar else ('Approve the booking' if kind == 'approve' else 'Reject the booking') }}</div>
+  <table class="detail">
+    <tr><td>{{ 'رقم الطلب' if ar else 'Request' }}</td><td dir="ltr">{{ b.req_id }}</td></tr>
+    <tr><td>{{ 'مقدّم الطلب' if ar else 'Applicant' }}</td><td><bdi>{{ b.full_name }}</bdi></td></tr>
+    <tr><td>{{ 'المناسبة' if ar else 'Event' }}</td><td><bdi>{{ b.title }}</bdi></td></tr>
+    <tr><td>{{ 'المبنى أو المرفق' if ar else 'Building or facility' }}</td><td><bdi>{{ b.hall_name }}</bdi></td></tr>
+    <tr><td>{{ 'الموعد' if ar else 'When' }}</td><td dir="ltr">{{ b.start_date }}{% if b.end_date and b.end_date != b.start_date %} → {{ b.end_date }}{% endif %} {% if not b.full_day %}{{ b.start_time }}{% if b.end_time %} - {{ b.end_time }}{% endif %}{% endif %}</td></tr>
+  </table>
+  {% if done == 'ok' %}
+  <div class="alert alert-success" style="margin-top:14px"><i class="fas fa-circle-check"></i> {{ 'تم تنفيذ الإجراء وأُبلغ صاحب الطلب.' if ar else 'Done. The applicant was notified.' }}</div>
+  {% elif done == 'already' %}
+  <div class="alert alert-info" style="margin-top:14px"><i class="fas fa-circle-info"></i> {{ 'هذا الطلب لم يعد قيد المراجعة، فلا إجراء مطلوباً.' if ar else 'This request is no longer pending, so nothing is needed.' }}</div>
+  {% else %}
+  <form method="post" style="margin-top:14px">
+    <input type="hidden" name="token" value="{{ request.values.get('token', '') }}">
+    <input type="hidden" name="lang" value="{{ lang }}">
+    {% if kind == 'reject' %}
+    <div class="form-group"><label for="reason">{{ 'سبب الرفض' if ar else 'Rejection reason' }} *</label><input type="text" id="reason" name="reason" maxlength="500" required></div>
+    {% if need_reason %}<div class="alert alert-error">{{ 'سبب الرفض مطلوب.' if ar else 'The reason is required.' }}</div>{% endif %}
+    {% endif %}
+    <button class="btn {{ 'btn-green' if kind == 'approve' else 'btn-red' }} big-btn" type="submit">{{ ('تأكيد الموافقة' if kind == 'approve' else 'تأكيد الرفض') if ar else ('Confirm approval' if kind == 'approve' else 'Confirm rejection') }}</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
