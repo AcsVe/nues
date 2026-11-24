@@ -481,3 +481,15 @@ def test_public_calendar_hides_private_details(admin, client):
     flat = str(shown)
     assert any(b['title'] == 'اجتماع سري' for b in shown['bookings']) and 'سامي السري' not in flat and j['reqId'] not in flat   # العنوان فقط بقرار المدير
     post(admin, '/api/admin/settings', publicShowDetails=False)
+
+
+def test_terms_shown_and_editable(admin, client):
+    page = client.get('/book').data.decode()
+    assert 'الشروط والأحكام' in page and 'يُستخدم المبنى أو المرفق للغرض المذكور' in page      # النص الافتراضي
+    assert 'terms-list' in client.get('/book?lang=en').data.decode()
+    post(admin, '/api/admin/settings', termsAr='شرط أول\nشرط ثانٍ')
+    page = client.get('/book').data.decode()
+    assert 'شرط أول' in page and 'شرط ثانٍ' in page and 'يُستخدم المبنى' not in page
+    assert admin.get('/api/admin/settings').get_json()['termsAr'] == 'شرط أول\nشرط ثانٍ'
+    post(admin, '/api/admin/settings', termsAr='')
+    assert 'يُستخدم المبنى' in client.get('/book').data.decode()

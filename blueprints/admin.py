@@ -752,6 +752,8 @@ def get_settings():
     b = get_brand()
     out = {'orgAr': b['org_ar'], 'orgEn': b['org_en'], 'accent': b['accent'], 'logo': b['logo_url'] or '',
            'mail': mail.graph_ready(), 'sender': current_app.config.get('MS_SENDER_EMAIL', ''),
+           'termsAr': AppSetting.get_str('terms_ar', ''), 'termsEn': AppSetting.get_str('terms_en', ''),
+           'termsDefaultAr': svc.DEFAULT_TERMS_AR, 'termsDefaultEn': svc.DEFAULT_TERMS_EN,
            'staffDailySummaryTime': AppSetting.get_str('staff_daily_summary_time', '07:00'),
            'staffReminderLeadMinutes': AppSetting.get_str('staff_reminder_lead_minutes', ''),
            'remindersAvailable': bool(current_app.config.get('REMINDERS_SCHEDULER', True))}
@@ -772,6 +774,8 @@ def save_settings():
     for k, (key, _default, perm) in BOOL_SETTINGS.items():
         if k in d and not can(u, perm):
             return err_json('لا تملك صلاحية لهذا الإعداد', 403)
+    if any(k in d for k in ('termsAr', 'termsEn')) and not can(u, 'settings.approval'):
+        return err_json('لا تملك صلاحية لهذا الإعداد', 403)
     if any(k in d for k in ('staffDailySummaryTime', 'staffReminderLeadMinutes')) and not can(u, 'settings.reminders'):
         return err_json('لا تملك صلاحية لهذا الإعداد', 403)
     if identity:
@@ -782,6 +786,9 @@ def save_settings():
     for k, (key, _default, _perm) in BOOL_SETTINGS.items():
         if k in d:
             AppSetting.set_bool(key, bool(d[k]))
+    for k, key in (('termsAr', 'terms_ar'), ('termsEn', 'terms_en')):
+        if k in d:
+            AppSetting.set_str(key, str(d[k] or '').strip()[:4000])
     if 'staffDailySummaryTime' in d:
         val = txt(d['staffDailySummaryTime'], 5)
         if svc.TIME_RE.match(val):

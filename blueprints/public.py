@@ -45,7 +45,8 @@ def calendar():
 @public_bp.route('/book')
 def book():
     return _page('book.html', pre_date=svc.txt(request.args.get('date'), 10), pre_hall=svc.txt(request.args.get('hall'), 100),
-                 pre_start=svc.clean_time(request.args.get('start')))
+                 pre_start=svc.clean_time(request.args.get('start')),
+                 terms=[x.strip() for x in svc.terms_text(_lang()).splitlines() if x.strip()])
 
 
 @public_bp.route('/lookup')

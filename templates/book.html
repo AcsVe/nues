@@ -77,7 +77,11 @@
     <div id="attList"></div>
   </div>
 
-  <label class="terms"><input type="checkbox" id="fTerms"> <span>{{ 'أوافق على شروط استخدام المباني والمرافق، وأتحمل مسؤولية المحافظة عليها وتركها كما وجدتها.' if ar else 'I agree to the terms of using the buildings and facilities and take responsibility for keeping them in good order.' }}</span></label>
+  <div class="card terms-card">
+    <div class="card-title"><i class="fas fa-scale-balanced"></i> {{ 'الشروط والأحكام' if ar else 'Terms and Conditions' }}</div>
+    <ol class="terms-list" tabindex="0" aria-label="{{ 'نص الشروط والأحكام' if ar else 'The terms and conditions' }}">{% for t in terms %}<li><bdi>{{ t }}</bdi></li>{% endfor %}</ol>
+  </div>
+  <label class="terms"><input type="checkbox" id="fTerms"> <span>{{ 'قرأتُ الشروط والأحكام أعلاه وأوافق عليها.' if ar else 'I have read the terms and conditions above and agree to them.' }}</span></label>
   <div id="formAlert"></div>
   <button class="btn btn-primary big-btn" type="submit" id="subBtn"><i class="fas fa-paper-plane"></i> {{ 'إرسال الطلب' if ar else 'Submit the request' }}</button>
 </form>

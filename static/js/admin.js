@@ -382,12 +382,14 @@
       var set = function (id, v) { var el = $(id); if (el) el.value = v; };
       set('sOrgAr', s.orgAr); set('sOrgEn', s.orgEn); set('sAccent', s.accent); set('sSummaryTime', s.staffDailySummaryTime || '07:00'); set('sLead', s.staffReminderLeadMinutes || '');
       $('sAutoApprove').checked = !!s.autoApproveBookings; $('sPublicDetails').checked = !!s.publicShowDetails; $('sRemindersOn').checked = !!s.remindersEnabled; $('sRemindScheduled').checked = !!s.reminderScheduledEnabled; $('sSummaryOn').checked = !!s.staffDailySummaryEnabled;
+      $('sTermsAr').value = s.termsAr || ''; $('sTermsEn').value = s.termsEn || ''; $('sTermsAr').placeholder = s.termsDefaultAr; $('sTermsEn').placeholder = s.termsDefaultEn;
       var img = $('sLogoImg'); if (s.logo) { img.src = s.logo; img.style.display = ''; } else img.style.display = 'none';
       $('sMail').textContent = s.mail ? L('البريد الإلكتروني مُفعَّل (المرسل: ', 'Email is on (sender: ') + s.sender + ')' : L('البريد الإلكتروني غير مُعدّ: لا تُرسل رسائل الحجز ولا التذكيرات.', 'Email is not set up: booking messages and reminders are not sent.');
       $('sRemindNote').textContent = L('الإبلاغ بالحجز الجديد والاعتماد والتعليقات يتبع خيارات كل جهة في «جهات الاتصال».', 'New-booking, approval and comment notices follow each contact’s options in “Contacts”.');
     }).catch(fail);
     [].forEach.call(document.querySelectorAll('[data-perm]'), function (c) { c.style.display = can(c.dataset.perm) ? '' : 'none'; });
   }
+  $('sTermsSave').addEventListener('click', function () { post('/api/admin/settings', { termsAr: $('sTermsAr').value, termsEn: $('sTermsEn').value }).then(function () { toast(L('تم الحفظ', 'Saved')); }).catch(fail); });
   $('sIdentitySave').addEventListener('click', function () {
     post('/api/admin/settings', { orgAr: $('sOrgAr').value, orgEn: $('sOrgEn').value, accent: $('sAccent').value }).then(function () { toast(L('تم الحفظ، حدّث الصفحة لرؤية الهوية الجديدة', 'Saved - refresh the page to see the new identity')); }).catch(fail);
   });

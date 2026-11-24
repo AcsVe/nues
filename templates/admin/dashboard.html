@@ -275,6 +275,13 @@
         <label class="check-line"><input type="checkbox" id="sPublicDetails"> <span>{{ 'إظهار عناوين المناسبات للعموم في الروزنامة والجدول (الافتراضي: مخفية، فيظهر «محجوز» فقط، ولا يظهر اسم صاحب الحجز أبداً)' if ar else 'Show event titles to the public in the calendar and schedule (default: hidden, so only “Booked” shows, and the applicant name is never shown)' }}</span></label>
         <label class="check-line"><input type="checkbox" id="sAutoApprove"> <span>{{ 'اعتماد كل حجز جديد فور تقديمه (ما عدا المباني والمرافق التي تتطلب موافقة مسبقة). تصل الإشعارات كالمعتاد.' if ar else 'Approve every new booking as soon as it is submitted (except buildings and facilities that need prior approval). Notices are sent as usual.' }}</span></label>
       </div>
+      <div class="card" data-perm="settings.approval">
+        <div class="card-title"><i class="fas fa-scale-balanced"></i> {{ 'الشروط والأحكام' if ar else 'Terms and conditions' }}</div>
+        <p class="hint" style="margin-bottom:8px">{{ 'تظهر في صفحة الحجز قبل الموافقة عليها. اكتب كل شرط في سطر. اترك الحقل فارغاً لاستعمال النص الافتراضي.' if ar else 'Shown on the booking page before the booker agrees. Write one term per line. Leave a box empty to use the default text.' }}</p>
+        <div class="form-group"><label for="sTermsAr">{{ 'النص بالعربية' if ar else 'Arabic text' }}</label><textarea id="sTermsAr" rows="6" maxlength="4000"></textarea></div>
+        <div class="form-group"><label for="sTermsEn">{{ 'النص بالإنجليزية' if ar else 'English text' }}</label><textarea id="sTermsEn" rows="6" maxlength="4000" dir="ltr"></textarea></div>
+        <button class="btn btn-primary" type="button" id="sTermsSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ الشروط' if ar else 'Save the terms' }}</button>
+      </div>
       <div class="card" data-perm="settings.reminders">
         <div class="card-title"><i class="fas fa-bell"></i> {{ 'التذكيرات الآلية بالبريد' if ar else 'Automatic email reminders' }}</div>
         <label class="check-line"><input type="checkbox" id="sRemindersOn"> <span>{{ 'تشغيل خدمة التذكيرات (مفتاح عام يوقف الأنواع كلها)' if ar else 'Turn the reminder service on (a master switch for all kinds)' }}</span></label>

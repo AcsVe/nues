@@ -182,6 +182,28 @@ def capacity_of(hall):
     return int(m.group()) if m else None
 
 
+DEFAULT_TERMS_AR = (
+    'يُستخدم المبنى أو المرفق للغرض المذكور في الطلب فقط، وفي الموعد المحدد.\n'
+    'يلتزم صاحب الحجز بالمحافظة على المحتويات والمرافق وتسليم المكان نظيفاً كما استلمه، ويتحمل تكلفة أي تلف.\n'
+    'يلتزم بعدد الحضور المصرّح به وبما لا يتجاوز سعة المكان.\n'
+    'لا يُعدّ الحجز نافذاً إلا بعد اعتماد الإدارة ووصول رسالة الاعتماد.\n'
+    'للإدارة إلغاء الحجز أو تعديل موعده لأسباب تشغيلية مع إبلاغ صاحبه.\n'
+    'يُبلَّغ عن إلغاء الحجز قبل موعده بوقت كافٍ ليتسنى إتاحته لغيره.')
+DEFAULT_TERMS_EN = (
+    'The building or facility is used only for the purpose stated in the request and at the agreed time.\n'
+    'The booker keeps the contents and facilities in good order, hands the place back clean as received, and bears the cost of any damage.\n'
+    'The stated attendance and the capacity of the place must not be exceeded.\n'
+    'A booking is valid only after the administration approves it and the approval message arrives.\n'
+    'The administration may cancel or reschedule a booking for operational reasons and will notify the booker.\n'
+    'Please cancel a booking in good time so that the slot can be given to others.')
+
+
+def terms_text(lang):
+    """نص الشروط والأحكام: ما حرّره المدير، وإلا النص الافتراضي."""
+    key, default = ('terms_ar', DEFAULT_TERMS_AR) if lang != 'en' else ('terms_en', DEFAULT_TERMS_EN)
+    return (AppSetting.get_str(key, '') or '').strip() or default
+
+
 REPEATS = ('none', 'daily', 'weekly', 'monthly')
 MAX_REPEAT = 52
 
