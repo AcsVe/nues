@@ -93,6 +93,7 @@
     document.getElementById('dayList').innerHTML = h;
     var link = document.getElementById('dayBook');
     link.style.display = ds < today ? 'none' : '';
+    if (ds < today) document.getElementById('dayList').insertAdjacentHTML('afterbegin', '<div class="alert alert-info" style="margin-bottom:10px"><i class="fas fa-circle-info"></i> ' + L('هذا اليوم مضى فلا يمكن الحجز فيه. اختر اليوم أو يوماً قادماً.', 'This day has passed, so it cannot be booked. Choose today or a later day.') + '</div>');
     link.href = '/book?lang=' + LANG + '&date=' + ds + (hallSel ? '&hall=' + encodeURIComponent(hallSel) : '');
     document.getElementById('dayModal').classList.add('open');
   }
