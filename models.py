@@ -18,6 +18,16 @@ class Hall(db.Model):
     notes = db.Column(db.Text)
     requires_approval = db.Column(db.Boolean, default=False)
     active = db.Column(db.Boolean, default=True)
+    # نوع المبنى أو المرفق: hall قاعة، theater مسرح، field ملعب، gym صالة رياضية، building مبنى، facility مرفق
+    category = db.Column(db.String(20), default='hall')
+    sort_order = db.Column(db.Integer, default=0)
+
+
+CATEGORIES = ('hall', 'theater', 'field', 'gym', 'building', 'facility')
+CATEGORY_NAMES = {
+    'hall': ('قاعة', 'Hall'), 'theater': ('مسرح', 'Theater'), 'field': ('ملعب', 'Sports field'),
+    'gym': ('صالة رياضية', 'Sports hall'), 'building': ('مبنى', 'Building'), 'facility': ('مرفق', 'Facility'),
+}
 
 
 class Booking(db.Model):
@@ -40,8 +50,12 @@ class Booking(db.Model):
     attachments = db.Column(db.Text)  # روابط المرفقات مفصولة بفاصلة
     status = db.Column(db.String(20), default='pending')  # pending, approved, rejected, cancelled
     reject_reason = db.Column(db.Text)
+    cancel_reason = db.Column(db.Text)
     cc_emails = db.Column(db.Text)
     action_date = db.Column(db.DateTime)
+    approved_by = db.Column(db.String(200))
+    action_token = db.Column(db.String(64))   # يؤمّن روابط الموافقة والرفض في بريد الإدارة
+    staff_reminder_sent = db.Column(db.Boolean, default=False)
 
 
 class BlockedPeriod(db.Model):
@@ -62,6 +76,44 @@ class Contact(db.Model):
     email = db.Column(db.String(100), nullable=False, unique=True)
     name = db.Column(db.String(100))
     added_at = db.Column(db.DateTime, default=datetime.utcnow)
+    hall_name = db.Column(db.String(100))              # فارغ = كل المباني والمرافق
+    notify_new = db.Column(db.Boolean, default=True)        # إشعار الحجز الجديد مع رابطَي الموافقة والرفض
+    new_readonly = db.Column(db.Boolean, default=False)     # الإشعار للاطّلاع فقط (بلا رابطَي الموافقة والرفض)
+    notify_approved = db.Column(db.Boolean, default=True)   # إشعار بعد اعتماد حجز
+    notify_comment = db.Column(db.Boolean, default=False)   # إشعار عند إضافة تعليق
+    notify_staff_reminder = db.Column(db.Boolean, default=False)   # الملخص اليومي وتذكير اقتراب الحجز
+
+
+class BookingReminder(db.Model):
+    """تذكير بريدي في وقت محدد: لصاحب الحجز (kind=booker) أو للإدارة (kind=admin)."""
+    __tablename__ = 'booking_reminders'
+    id = db.Column(db.Integer, primary_key=True)
+    booking_id = db.Column(db.Integer, db.ForeignKey('bookings.id'), nullable=False)
+    kind = db.Column(db.String(10), nullable=False, default='booker')
+    remind_at = db.Column(db.DateTime, nullable=False)       # بتوقيت عمّان
+    recipient_email = db.Column(db.String(200), nullable=False)
+    note = db.Column(db.Text)
+    sent = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class BookingComment(db.Model):
+    __tablename__ = 'booking_comments'
+    id = db.Column(db.Integer, primary_key=True)
+    booking_id = db.Column(db.Integer, db.ForeignKey('bookings.id'), nullable=False)
+    author_name = db.Column(db.String(200))
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class PasswordReset(db.Model):
+    """رمز إعادة تعيين كلمة المرور: يُحفظ مشفّراً، صالح ساعة ولمرة واحدة."""
+    __tablename__ = 'password_resets'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('admin_users.id'), nullable=False)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used = db.Column(db.Boolean, default=False)
 
 
 class AppSetting(db.Model):
@@ -110,14 +162,28 @@ class AdminUser(db.Model):
     email = db.Column(db.String(150))
     password_hash = db.Column(db.String(255), nullable=False)
     role = db.Column(db.String(20), default='admin')
+    is_sysadmin = db.Column(db.Boolean, default=False)   # مدير النظام: كل الصلاحيات وإدارة المستخدمين
+    perms = db.Column(db.Text)                           # صلاحيات المستخدم العادي مفصولة بفاصلة
     active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_login = db.Column(db.DateTime)
 
+    def perm_list(self):
+        return [p for p in (self.perms or '').split(',') if p]
+
     def to_dict(self):
         return {'id': self.id, 'username': self.username, 'name': self.name or '', 'email': self.email or '',
-                'active': bool(self.active),
+                'active': bool(self.active), 'sysadmin': bool(self.is_sysadmin), 'perms': self.perm_list(),
                 'lastLogin': self.last_login.strftime('%Y-%m-%d %H:%M') if self.last_login else ''}
+
+
+def get_setting(key, default=None):
+    v = AppSetting.get_str(key, '')
+    return v if v != '' else default
+
+
+def set_setting(key, value):
+    AppSetting.set_str(key, value)
 
 
 def add_missing_columns():
@@ -135,3 +201,8 @@ def add_missing_columns():
                     continue
                 coltype = col.type.compile(db.engine.dialect)
                 conn.execute(text(f'ALTER TABLE {tb.name} ADD COLUMN {col.name} {coltype}'))
+                # الصفوف القائمة تأخذ القيمة الافتراضية للعمود الجديد (وإلا بقيت فارغة)
+                dflt = col.default.arg if col.default is not None and not callable(col.default.arg) else None
+                if dflt is not None:
+                    conn.execute(text(f'UPDATE {tb.name} SET {col.name} = :v WHERE {col.name} IS NULL'),
+                                 {'v': int(dflt) if isinstance(dflt, bool) else dflt})

@@ -1,87 +1,45 @@
-<!DOCTYPE html>
-<html lang="{{ lang }}" dir="{{ lang == 'ar' and 'rtl' or 'ltr' }}">
-<head>
-    <script>
-      ;(function () {
-        var t = new URLSearchParams(location.search).get('theme');
-        if (t) document.documentElement.dataset.theme = t;
-      })();
-    </script>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ lang == 'ar' and 'الروزنامة' or 'Calendar' }}</title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
-{% include "_head.html" %}
-</head>
-<body class="calendar-page"
-      data-lang="{{ lang }}"
-      data-theme="{{ theme or '' }}"
-      data-org-ar="{{ org_ar }}"
-      data-org-en="{{ org_en }}"
-      data-logo="{{ logo }}"
-      data-pre-date="{{ pre_date or '' }}">
-
-    <div class="top-bar">
-        <div class="logo-area">
-            <img src="{{ logo }}" alt="{{ 'شعار المؤسسة' if lang == 'ar' else 'Organization logo' }}">
-            <div>
-                <h1 id="hdrTitle">{{ lang == 'ar' and org_ar or org_en }}</h1>
-                <p id="hdrSub">{{ lang == 'ar' and 'نظام حجز القاعات والمرافق' or 'Venue & Facility Booking System' }}</p>
-            </div>
-        </div>
-        <div class="top-actions">
-            <div class="clock-display"><i class="fas fa-clock"></i> <span id="clockEl"></span></div>
-            <button class="btn-top" onclick="toggleLang()" id="btnLang"><i class="fas fa-globe"></i> <span id="langTxt">{{ lang == 'ar' and 'EN' or 'عربي' }}</span></button>
-            <a class="btn-top" id="adminLink" href="/admin?lang={{ lang }}{% if theme %}&theme={{ theme }}{% endif %}"><i class="fas fa-lock"></i> <span id="tAdmin">{{ lang == 'ar' and 'لوحة التحكم' or 'Admin' }}</span></a>
-        </div>
+{% extends 'base_public.html' %}
+{% block title %}{{ 'الروزنامة' if lang == 'ar' else 'Calendar' }}{% endblock %}
+{% block content %}
+{% set ar = lang == 'ar' %}
+<div class="page-head">
+  <div><h1><i class="fas fa-calendar-days" style="color:var(--primary)"></i> {{ 'روزنامة الحجوزات' if ar else 'Bookings Calendar' }}</h1>
+    <p>{{ 'اختر يوماً لعرض حجوزاته أو لحجز مبنى أو مرفق.' if ar else 'Choose a day to see its bookings or to book a building or facility.' }}</p></div>
+  <a class="btn btn-primary" href="/book?lang={{ lang }}"><i class="fas fa-circle-plus"></i> {{ 'حجز جديد' if ar else 'New booking' }}</a>
+</div>
+<div class="card">
+  <div class="cal-bar">
+    <div class="cal-nav">
+      <button class="icon-btn" type="button" id="prevBtn" aria-label="{{ 'الشهر السابق' if ar else 'Previous month' }}"><i class="fas fa-chevron-{{ 'right' if ar else 'left' }}"></i></button>
+      <button class="icon-btn" type="button" id="nextBtn" aria-label="{{ 'الشهر التالي' if ar else 'Next month' }}"><i class="fas fa-chevron-{{ 'left' if ar else 'right' }}"></i></button>
+      <button class="btn btn-outline btn-sm" type="button" id="todayBtn">{{ 'اليوم' if ar else 'Today' }}</button>
     </div>
-
-    <div class="wrap">
-        <div class="toolbar">
-            <select id="hallFilter" onchange="loadMonth()" aria-label="{{ 'تصفية حسب القاعة' if lang == 'ar' else 'Filter by venue' }}">
-                <option value="">{{ lang == 'ar' and '— كل القاعات —' or '— All Venues —' }}</option>
-            </select>
-        </div>
-        <div class="cal-card">
-            <div class="cal-nav">
-                <h3 id="mTitle"></h3>
-                <div class="nav-btns">
-                    <button class="nav-btn today-btn" id="btnToday" onclick="goToday()">{{ lang == 'ar' and 'اليوم' or 'Today' }}</button>
-                    <button class="nav-btn" onclick="nav(-1)" aria-label="{{ 'السابق' if lang == 'ar' else 'Previous' }}"><i class="fas fa-chevron-{{ lang == 'ar' and 'right' or 'left' }}"></i></button>
-                    <button class="nav-btn" onclick="nav(1)" aria-label="{{ 'التالي' if lang == 'ar' else 'Next' }}"><i class="fas fa-chevron-{{ lang == 'ar' and 'left' or 'right' }}"></i></button>
-                </div>
-            </div>
-            <div class="cal-grid" id="grid">
-                <div class="cal-hdr" data-ar="الأحد"    data-en="Sun">{{ lang == 'ar' and 'الأحد' or 'Sun' }}</div>
-                <div class="cal-hdr" data-ar="الاثنين"  data-en="Mon">{{ lang == 'ar' and 'الاثنين' or 'Mon' }}</div>
-                <div class="cal-hdr" data-ar="الثلاثاء" data-en="Tue">{{ lang == 'ar' and 'الثلاثاء' or 'Tue' }}</div>
-                <div class="cal-hdr" data-ar="الأربعاء" data-en="Wed">{{ lang == 'ar' and 'الأربعاء' or 'Wed' }}</div>
-                <div class="cal-hdr" data-ar="الخميس"   data-en="Thu">{{ lang == 'ar' and 'الخميس' or 'Thu' }}</div>
-                <div class="cal-hdr" data-ar="الجمعة"   data-en="Fri">{{ lang == 'ar' and 'الجمعة' or 'Fri' }}</div>
-                <div class="cal-hdr" data-ar="السبت"    data-en="Sat">{{ lang == 'ar' and 'السبت' or 'Sat' }}</div>
-            </div>
-            <div class="legend">
-                <span><i style="background:var(--accent)"></i> <span id="lgApp">{{ lang == 'ar' and 'معتمد' or 'Approved' }}</span></span>
-                <span><i style="background:#EBB37B"></i> <span id="lgPend">{{ lang == 'ar' and 'قيد المراجعة' or 'Pending' }}</span></span>
-                <span><i style="background:#c0392b"></i> <span id="lgBlk">{{ lang == 'ar' and 'غير متاح' or 'Blocked' }}</span></span>
-            </div>
-        </div>
+    <div class="cal-title" id="calTitle" aria-live="polite"></div>
+    <div class="cal-filters">
+      <select id="hallFilter" aria-label="{{ 'تصفية حسب المبنى أو المرفق' if ar else 'Filter by building or facility' }}"><option value="">{{ 'كل المباني والمرافق' if ar else 'All buildings and facilities' }}</option></select>
     </div>
+  </div>
+  <div class="chips" id="catChips" role="group" aria-label="{{ 'النوع' if ar else 'Type' }}"></div>
+  <div class="legend">
+    <span><i style="background:var(--approved)"></i>{{ 'معتمد' if ar else 'Approved' }}</span>
+    <span><i style="background:var(--pending)"></i>{{ 'قيد المراجعة' if ar else 'Pending' }}</span>
+    <span><i style="background:var(--blocked)"></i>{{ 'غير متاح' if ar else 'Unavailable' }}</span>
+  </div>
+  <div class="cal-grid" id="calGrid"></div>
+</div>
 
-    <div class="modal-bg" id="modalBg" onclick="closeModal()">
-        <div class="modal" onclick="event.stopPropagation()">
-            <div class="modal-hdr">
-                <h3 id="modalTitle"></h3>
-                <button class="modal-cls" onclick="closeModal()" aria-label="{{ 'إغلاق' if lang == 'ar' else 'Close' }}"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="modal-body" id="modalBody"></div>
-        </div>
+<div class="modal-overlay" id="dayModal" role="dialog" aria-modal="true" aria-labelledby="dayTitle">
+  <div class="modal">
+    <div class="modal-title" id="dayTitle" dir="ltr" style="text-align:start"></div>
+    <div class="day-list" id="dayList"></div>
+    <div class="modal-footer">
+      <a class="btn btn-primary" id="dayBook" href="/book"><i class="fas fa-circle-plus"></i> {{ 'احجز هذا اليوم' if ar else 'Book this day' }}</a>
+      <button class="btn btn-outline" type="button" id="dayClose">{{ 'إغلاق' if ar else 'Close' }}</button>
     </div>
-
-    <footer id="footerEl">&copy; <span id="footerYear"></span> <span id="footerOrg">{{ lang == 'ar' and org_ar or org_en }}</span></footer>
-
-    <script src="/static/js/calendar.js"></script>
-</body>
-</html>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>window.PRE_DATE = {{ pre_date|tojson }};</script>
+<script src="{{ asset('js/calendar.js') }}"></script>
+{% endblock %}

@@ -181,3 +181,79 @@ def send_update_email(d, bcc_list=None):
              f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم <strong>تعديل بيانات حجزك</strong>. تفاصيل الحجز المحدّثة:<br><br>"
              + _table(_full_rows(d, '#247680')))
     _send(d, 'تحديث الحجز', inner, bcc_list)
+
+
+# ───────────── رسائل الإدارة والتذكيرات ─────────────
+_EMAIL_RE = __import__('re').compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+
+
+def EMAIL_OK(e):
+    return bool(e and _EMAIL_RE.match(str(e).strip()))
+
+
+def _button(url, label, bg):
+    return (f'<a href="{escape(url)}" style="display:inline-block;background:{bg};color:#ffffff;padding:11px 26px;'
+            f'border-radius:8px;text-decoration:none;font-weight:bold;margin:4px 6px;">{label}</a>')
+
+
+def _org():
+    from utils.brand import get_brand
+    return get_brand()['org_ar']
+
+
+def send_staff_new_booking(to, d, approve_url=None, reject_url=None):
+    """إشعار الإدارة بحجز جديد، ومعه رابطا الموافقة والرفض لمن يملكهما."""
+    rows = [_row('رقم الطلب', d['reqId'], color='#0A7C86'), _row('مقدّم الطلب', d['name']),
+            _row('البريد الإلكتروني', d['email']), _row('الهاتف', d.get('phone') or '-'),
+            _row('المناسبة', d['title']), _row('المبنى أو المرفق', d['hall']),
+            _row('الوقت والتاريخ', f"{d['timeStr']} | {d['dateStr']}", last=not d.get('notes'))]
+    if d.get('notes'):
+        rows.append(_row('ملاحظات', d['notes'], last=True))
+    buttons = ''
+    if approve_url and reject_url:
+        buttons = ('<div style="text-align:center;margin:22px 0 6px;">' + _button(approve_url, 'موافقة', '#1e8449')
+                   + _button(reject_url, 'رفض', '#c0392b') + '</div>')
+    inner = (_badge('🔔 حجز جديد بانتظار المراجعة', '#EBB37B', '#333') + 'وصل طلب حجز جديد:<br><br>'
+             + _table(rows) + buttons)
+    send_email(to, f"حجز جديد — {d['reqId']} | {_org()}", _template(inner))
+
+
+def send_comment_email(to, d, author, comment):
+    inner = (_badge('💬 تعليق جديد على حجز', '#0A7C86') + _table([_row('رقم الطلب', d['reqId']), _row('المناسبة', d['title'], last=True)])
+             + f'<div style="margin-top:14px;padding:12px 16px;background:#f0f7f7;border-radius:8px;"><strong>{escape(author or "")}:</strong><br>{escape(comment).replace(chr(10), "<br>")}</div>')
+    send_email(to, f"تعليق على الحجز {d['reqId']} | {_org()}", _template(inner))
+
+
+def send_daily_summary(to, date_str, items):
+    rows = ''.join(
+        f'<tr><td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">{escape(i["time"])}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">{escape(i["hall"])}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">{escape(i["title"])}</td>'
+        f'<td style="padding:8px 12px;border-bottom:1px solid #e0e0e0;">{escape(i["name"])}</td></tr>' for i in items)
+    inner = (_badge(f'📅 حجوزات اليوم {date_str}', '#0A7C86') + f'عدد الحجوزات المعتمدة اليوم: <strong>{len(items)}</strong><br><br>'
+             '<table width="100%" dir="rtl" style="border-collapse:collapse;"><tr style="background:#e8f4f5;">'
+             '<th style="padding:8px 12px;text-align:right;">الوقت</th><th style="padding:8px 12px;text-align:right;">المبنى أو المرفق</th>'
+             '<th style="padding:8px 12px;text-align:right;">المناسبة</th><th style="padding:8px 12px;text-align:right;">مقدّم الطلب</th></tr>'
+             + rows + '</table>')
+    send_email(to, f'ملخص حجوزات اليوم {date_str} | {_org()}', _template(inner))
+
+
+def send_upcoming_reminder(to, d, lead_minutes):
+    inner = (_badge('⏰ حجز يقترب موعده', '#EBB37B', '#333') + f'يبدأ الحجز التالي خلال نحو <strong>{int(lead_minutes)}</strong> دقيقة:<br><br>'
+             + _table(_full_rows(d, '#0A7C86')))
+    send_email(to, f"تذكير بحجز — {d['reqId']} | {_org()}", _template(inner))
+
+
+def send_booker_reminder(d, note=''):
+    inner = (_badge('⏰ تذكير بحجزك', '#EBB37B', '#333') + f"مرحباً <strong>{escape(d['name'])}</strong>،<br>هذا تذكير بحجزك:<br><br>"
+             + _table(_full_rows(d, '#0A7C86'))
+             + (f'<br><div style="padding:10px 14px;background:#f0f7f7;border-radius:8px;">{escape(note)}</div>' if note else ''))
+    send_email(d['email'], f"تذكير بحجزك — {d['reqId']} | {_org()}", _template(inner))
+
+
+def send_password_reset(to, name, link):
+    inner = (_badge('🔑 إعادة تعيين كلمة المرور', '#0A7C86') + f'مرحباً <strong>{escape(name or "")}</strong>،<br>'
+             'وصلنا طلب لإعادة تعيين كلمة مرور حسابك. الرابط صالح ساعة واحدة ويُستعمل مرة واحدة:<br>'
+             f'<div style="text-align:center;margin:18px 0;">{_button(link, "تعيين كلمة مرور جديدة", "#0A7C86")}</div>'
+             '<font style="font-size:13px;color:#666666;">إن لم تطلب ذلك فتجاهل هذه الرسالة.</font>')
+    send_email(to, f'إعادة تعيين كلمة المرور | {_org()}', _template(inner))

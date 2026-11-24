@@ -24,11 +24,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.environ.get('E2E_OUT') or tempfile.mkdtemp(prefix='acs-ui-')
 os.makedirs(OUT, exist_ok=True)
 
-TABS = re.findall(r"switchTab\('([a-z-]+)'", open(os.path.join(ROOT, 'templates', 'admin.html'), encoding='utf-8').read())
+TABS = list(dict.fromkeys(re.findall(r'id="tab-([a-z-]+)"', open(os.path.join(ROOT, 'templates', 'admin', 'dashboard.html'), encoding='utf-8').read())))
 TABS = list(dict.fromkeys(TABS))
 # عناصر تبقى بالعربية عمداً في الواجهة الإنجليزية: زر تبديل اللغة، واسم المستخدم «مدير النظام» المحفوظ في القاعدة
 # «العربية» زر تبديل اللغة، و«مدير النظام» الاسم الكامل لأول مدير (بيانات محفوظة لا نص واجهة)
-UNTRANSLATED_OK = ['عربي', 'مدير النظام']
+UNTRANSLATED_OK = ['العربية', 'عربي', 'مدير النظام']
 
 AUDIT_JS = r"""(args) => {
   const [scopeSel, checkArabic, okList] = args;
@@ -99,7 +99,7 @@ def start_server(data, lang, port):
 
 PORTS = {'ar': 5291, 'en': 5292}
 servers = {k: start_server(os.path.join(OUT, f'data-{k}'), k, p) for k, p in PORTS.items()}
-PUBLIC = ['/', '/book']
+PUBLIC = ['/calendar', '/book', '/lookup', '/admin/login']
 # فحص لغة الواجهة: النصوص الظاهرة ونصوص الإرشاد (placeholder وtitle وalt وaria-label) — يُنسخ إلى tests/ui_audit.py في كل نظام.
 # يرصد: نصاً يشبه الكود (أسماء متغيرات وملفات وقيم برمجية)، وكلمات عامية أو دخيلة في الواجهة العربية، ونص إرشاد بالإنجليزية
 # في الواجهة العربية أو بالعربية في الإنجليزية، وصورة بلا نص بديل.
@@ -184,20 +184,20 @@ try:
                     page.wait_for_timeout(500)
                     report.append((vp_name, ui, data, u, run(page, 'body', ui, check_ar), list(errs)))
                     errs.clear()
-                page.goto(f'{base}/admin?lang={ui}', wait_until='networkidle')
-                page.fill('#loginUser', 'admin')
-                page.fill('#loginPass', 'audit-pass-123')
-                page.press('#loginPass', 'Enter')
-                page.wait_for_selector('#loginOverlay', state='hidden', timeout=10000)
+                page.goto(f'{base}/admin/login?lang={ui}', wait_until='networkidle')
+                page.fill('#username', 'admin')
+                page.fill('#password', 'audit-pass-123')
+                page.click('button[type=submit]')
                 page.wait_for_load_state('networkidle')
+                page.wait_for_timeout(800)
                 for t in TABS:
-                    page.click(f"[onclick*=\"switchTab('{t}'\"]")
+                    page.evaluate("(t) => document.querySelector('.nav-item[data-tab=\"' + t + '\"]').click()", t)
                     try:
                         page.wait_for_load_state('networkidle', timeout=8000)
                     except Exception:
                         pass
                     page.wait_for_timeout(500)
-                    report.append((vp_name, ui, data, t, run(page, f'#tc-{t}', ui, check_ar), list(errs)))
+                    report.append((vp_name, ui, data, t, run(page, f'#tab-{t}', ui, check_ar), list(errs)))
                     errs.clear()
                     if os.environ.get('SHOTS'):
                         page.screenshot(path=os.path.join(OUT, f'{vp_name}-{ui}{data}-{t}.jpg'), type='jpeg', quality=45)

@@ -15,9 +15,9 @@ from app import app as flask_app  # noqa: E402
 
 @pytest.fixture()
 def app():
-    import routes
+    import services
     from utils import auth
-    routes._HITS.clear()
+    services._HITS.clear()
     auth._FAILED.clear()
     return flask_app
 
@@ -29,8 +29,13 @@ def client(app):
 
 @pytest.fixture()
 def admin(app):
+    return login(app, 'admin', 'Secret-pass-1')
+
+
+def login(app, username, password):
+    """عميل مسجَّل الدخول من صفحة الدخول (نموذج)، وفيه رمز CSRF للطلبات المغيِّرة."""
     c = app.test_client()
-    r = c.post('/api/admin/login', json={'username': 'admin', 'password': 'Secret-pass-1'})
-    assert r.status_code == 200
-    c.headers = {'X-CSRF-Token': r.get_json()['csrf']}
+    r = c.post('/admin/login', data={'username': username, 'password': password})
+    assert r.status_code == 302, r.status_code
+    c.headers = {'X-CSRF-Token': c.get('/api/admin/session').get_json()['csrf']}
     return c

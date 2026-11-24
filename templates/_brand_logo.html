@@ -1,0 +1,4 @@
+{# The organization's logo (Settings → Identity), or the system icon until one is uploaded. #}
+{# إذا ضُبطت أيقونة العميل (FAVICON_FILE) ظهرت هي مكان الشعار داخل الصفحات (الرسمة فقط)، وإلا شعار المؤسسة أو أيقونة النظام. #}
+{% if favicon_url %}<img class="brand-logo sys-icon" src="{{ favicon_url }}" alt="">
+{% else %}<img class="brand-logo{{ ' sys-icon' if brand.is_icon }}" src="{{ brand.logo_src }}" alt="">{% endif %}

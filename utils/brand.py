@@ -15,7 +15,7 @@ from flask import current_app
 
 SYSTEM_ICON = '/static/brand/system.svg'
 SYSTEM_ICON_PNG = '/static/icon-192.png'      # للبريد: كثير من برامج البريد لا تعرض SVG
-DEFAULT_ACCENT = '#247680'
+DEFAULT_ACCENT = '#0A7C86'
 LOGO_EXTS = {'png', 'jpg', 'jpeg', 'webp', 'svg'}
 _HEX = re.compile(r'^#[0-9a-fA-F]{6}$')
 
@@ -25,6 +25,13 @@ def darken(hex_color, factor=0.72):
     h = hex_color.lstrip('#')
     r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
     return '#%02x%02x%02x' % (int(r * factor), int(g * factor), int(b * factor))
+
+
+def mix(hex_color, ratio):
+    """يمزج اللون مع الأبيض بنسبة ratio (0 إلى 1): للأسطح الفاتحة والأزرار."""
+    h = hex_color.lstrip('#')
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return '#%02x%02x%02x' % tuple(int(c + (255 - c) * ratio) for c in (r, g, b))
 
 
 def _setting(key, default=''):
@@ -118,7 +125,8 @@ def get_brand():
         'sys_en': 'Venue & Facility Booking System',
         # لا يُكرَّر اسم النظام بجوار اسم المؤسسة إذا تطابقا
         'show_sys': True,
-        'accent_dark': darken(accent),
+        'accent_dark': darken(accent), 'accent_deep': darken(accent, 0.5), 'accent_light': mix(accent, 0.25),
+        'accent_soft': mix(accent, 0.88),
     }
 
 

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 from flask import Flask, jsonify, request
 
@@ -33,27 +34,47 @@ def create_app():
         if Hall.query.count() == 0:
             db.session.add_all([
                 Hall(name_ar='القاعة الرئيسية', name_en='Main Hall', location='المبنى الرئيسي', code='H001',
-                     capacity='100', equipment='جهاز عرض، سبورة ذكية', active=True),
+                     capacity='100', equipment='جهاز عرض، سبورة ذكية', active=True, category='hall'),
                 Hall(name_ar='قاعة الاجتماعات', name_en='Meeting Room', location='المبنى الرئيسي', code='H002',
-                     capacity='30', equipment='شاشة، ميكروفون', active=True)])
+                     capacity='30', equipment='شاشة، ميكروفون', active=True, category='hall'),
+                Hall(name_ar='المسرح', name_en='Theater', location='المبنى الرئيسي', code='T001',
+                     capacity='250', equipment='إضاءة وصوتيات', active=True, category='theater', requires_approval=True),
+                Hall(name_ar='الملعب الرئيسي', name_en='Main Field', location='الساحة الخارجية', code='F001',
+                     capacity='60', active=True, category='field'),
+                Hall(name_ar='الصالة الرياضية', name_en='Sports Hall', location='المبنى الرياضي', code='G001',
+                     capacity='80', active=True, category='gym')])
             db.session.commit()
         from utils.auth import ensure_first_admin
         ensure_first_admin(app)
         from utils.brand import ensure_brand
         ensure_brand(app)
 
-    from routes import main_bp
-    app.register_blueprint(main_bp)
+    from blueprints.admin import admin_bp, api_bp
+    from blueprints.public import public_bp
+    app.register_blueprint(public_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(api_bp)
 
     from utils import app_version, favicon, page_shield
     app_version.install(app, os.path.dirname(os.path.abspath(__file__)))
     favicon.install(app)
     page_shield.install(app)
 
+    _static_v = {}
+
     @app.context_processor
     def _brand_context():
         from utils.brand import get_brand
-        return {'brand': get_brand()}
+
+        def asset(path):
+            # رقم نسخة من تاريخ الملف حتى لا يبقى المتصفح على نسخة قديمة
+            if path not in _static_v:
+                try:
+                    _static_v[path] = int(os.path.getmtime(os.path.join(app.static_folder, path)))
+                except OSError:
+                    _static_v[path] = 0
+            return f'/static/{path}?v={_static_v[path]}'
+        return {'brand': get_brand(), 'asset': asset, 'now_year': datetime.now().year}
 
     @app.after_request
     def _security_headers(resp):

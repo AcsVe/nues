@@ -70,29 +70,47 @@ def csrf_token():
     return session['csrf']
 
 
-def admin_required(fn):
-    """مسار للإدارة فقط: دخول صالح، ورمز CSRF في كل طلب غير القراءة."""
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if current_user() is None:
-            return jsonify({'error': 'Unauthorized', 'errorAr': 'انتهت الجلسة، سجّل الدخول من جديد'}), 401
-        if request.method not in ('GET', 'HEAD', 'OPTIONS'):
-            sent = request.headers.get('X-CSRF-Token', '')
-            if not sent or not hmac.compare_digest(sent, session.get('csrf', '')):
-                return jsonify({'error': 'Bad token', 'errorAr': 'رمز الحماية غير صالح، حدّث الصفحة'}), 403
-        return fn(*args, **kwargs)
-    return wrapper
+def admin_required(arg=None, *, sysadmin=False):
+    """مسار للإدارة فقط: دخول صالح، وصلاحية محدّدة اختيارية (مفتاح أو مجموعة مفاتيح، أو sysadmin=True لمدير النظام)،
+    ورمز CSRF في كل طلب غير القراءة. يُستعمل بلا وسيط `@admin_required` أو بوسيط `@admin_required('halls')`."""
+    from utils.perms import can
+
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            user = current_user()
+            if user is None:
+                return jsonify({'error': 'Unauthorized', 'errorAr': 'انتهت الجلسة، سجّل الدخول من جديد'}), 401
+            if request.method not in ('GET', 'HEAD', 'OPTIONS'):
+                sent = request.headers.get('X-CSRF-Token', '')
+                if not sent or not hmac.compare_digest(sent, session.get('csrf', '')):
+                    return jsonify({'error': 'Bad token', 'errorAr': 'رمز الحماية غير صالح، حدّث الصفحة'}), 403
+            if (sysadmin and not user.is_sysadmin) or (arg and not sysadmin and not can(user, arg)):
+                return jsonify({'error': 'Forbidden', 'errorAr': 'لا تملك صلاحية لهذا الإجراء'}), 403
+            return fn(*args, **kwargs)
+        return wrapper
+
+    if callable(arg):          # استعمال بلا أقواس
+        fn, arg = arg, None
+        return decorate(fn)
+    return decorate
 
 
 def ensure_first_admin(app):
     """أول تشغيل: إن لم يوجد أي حساب وضُبط ADMIN_PASS في .env صار حساب مدير النظام الأول."""
+    # ترحيل: إن لم يوجد مدير نظام صار أقدم حساب فعال مدير النظام (حسابات أُنشئت قبل نظام الصلاحيات)
     if AdminUser.query.first() is not None:
+        if AdminUser.query.filter_by(is_sysadmin=True).first() is None:
+            first = AdminUser.query.filter_by(active=True).order_by(AdminUser.id).first()
+            if first:
+                first.is_sysadmin = True
+                db.session.commit()
         return
     user = (app.config.get('ADMIN_USER') or 'admin').strip()
     pw = app.config.get('ADMIN_PASS') or ''
     if len(pw) < 8:
         print('[auth] no administrator yet - run: python ops/reset_password.py --create', flush=True)
         return
-    db.session.add(AdminUser(username=user, name=user, password_hash=hash_password(pw), role='admin', active=True))
+    db.session.add(AdminUser(username=user, name=user, password_hash=hash_password(pw), role='admin', is_sysadmin=True, active=True))
     db.session.commit()
     print(f'[auth] first administrator "{user}" created from .env', flush=True)

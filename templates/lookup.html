@@ -1,0 +1,44 @@
+{% extends 'base_public.html' %}
+{% block title %}{{ 'الاستعلام عن حجز' if lang == 'ar' else 'Look Up a Booking' }}{% endblock %}
+{% block content %}
+{% set ar = lang == 'ar' %}
+<div class="page-head"><div><h1><i class="fas fa-magnifying-glass" style="color:var(--primary)"></i> {{ 'الاستعلام عن حجز' if ar else 'Look Up a Booking' }}</h1>
+  <p>{{ 'أدخل رقم الطلب والبريد الإلكتروني المستعمل في الحجز.' if ar else 'Enter the request number and the email used for the booking.' }}</p></div></div>
+<div class="card form-card">
+  <form id="lookForm" class="form-grid">
+    <div class="form-group"><label for="lId">{{ 'رقم الطلب' if ar else 'Request number' }}</label><input type="text" id="lId" dir="ltr" placeholder="BK-…" autocomplete="off" required></div>
+    <div class="form-group"><label for="lEmail">{{ 'البريد الإلكتروني' if ar else 'Email' }}</label><input type="email" id="lEmail" dir="ltr" placeholder="name@example.org" required></div>
+    <div style="grid-column:1/-1"><button class="btn btn-primary" type="submit"><i class="fas fa-magnifying-glass"></i> {{ 'بحث' if ar else 'Search' }}</button></div>
+  </form>
+  <div id="lookAlert" style="margin-top:12px"></div>
+</div>
+<div class="card form-card" id="result" hidden>
+  <div class="card-title"><i class="fas fa-calendar-check"></i> <span id="resTitle"></span> <span id="resBadge"></span></div>
+  <table class="detail" id="resTable"></table>
+  <div class="action-btns" style="margin-top:14px" id="resActions"></div>
+</div>
+<div class="card form-card" id="editCard" hidden>
+  <div class="card-title"><i class="fas fa-pen"></i> {{ 'تعديل الحجز' if ar else 'Amend the booking' }}</div>
+  <p class="hint" style="margin-bottom:10px">{{ 'بعد التعديل يعود الحجز المعتمد إلى حالة «قيد المراجعة».' if ar else 'After an amendment an approved booking goes back to “Pending”.' }}</p>
+  <div class="form-group"><label for="eHall">{{ 'المبنى أو المرفق' if ar else 'Building or facility' }}</label><select id="eHall"></select></div>
+  <div class="form-grid">
+    <div class="form-group"><label for="eDate">{{ 'تاريخ البداية' if ar else 'Start date' }}</label><input type="date" id="eDate"></div>
+    <div class="form-group"><label for="eEnd">{{ 'تاريخ الانتهاء' if ar else 'End date' }}</label><input type="date" id="eEnd"></div>
+  </div>
+  <label class="switch-row"><input type="checkbox" id="eFull"> <span>{{ 'حجز يوم كامل' if ar else 'Full-day booking' }}</span></label>
+  <div class="form-grid" id="eTimeRow">
+    <div class="form-group"><label for="eFrom">{{ 'من الساعة' if ar else 'From' }}</label><input type="time" id="eFrom" dir="ltr"></div>
+    <div class="form-group"><label for="eTo">{{ 'إلى الساعة' if ar else 'To' }}</label><input type="time" id="eTo" dir="ltr"></div>
+  </div>
+  <div class="form-group"><label for="eTitle">{{ 'عنوان المناسبة' if ar else 'Event title' }}</label><input type="text" id="eTitle" maxlength="200"></div>
+  <div class="form-grid">
+    <div class="form-group"><label for="eName">{{ 'الاسم' if ar else 'Name' }}</label><input type="text" id="eName" maxlength="100"></div>
+    <div class="form-group"><label for="ePhone">{{ 'رقم الهاتف' if ar else 'Phone' }}</label><input type="tel" id="ePhone" dir="ltr"></div>
+  </div>
+  <div class="form-group"><label for="eNotes">{{ 'ملاحظات' if ar else 'Notes' }}</label><textarea id="eNotes" maxlength="2000"></textarea></div>
+  <div id="editAlert"></div>
+  <div class="action-btns"><button class="btn btn-primary" type="button" id="saveEdit"><i class="fas fa-floppy-disk"></i> {{ 'حفظ التعديلات' if ar else 'Save changes' }}</button>
+    <button class="btn btn-outline" type="button" id="cancelEdit">{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div>
+{% endblock %}
+{% block extra_scripts %}<script src="{{ asset('js/lookup.js') }}"></script>{% endblock %}

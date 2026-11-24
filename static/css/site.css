@@ -1,0 +1,83 @@
+/* مكوّنات خاصة بنظام الجمعية فوق نظام التصميم المشترك (app.css): الروزنامة، ونموذج الحجز، والاستعلام. */
+:root{--gold:#E8A33D;--gold-soft:#fdf1da;--pending:#d97706;--approved:#15803d;--blocked:#dc2626}
+.pub-foot{text-align:center;padding:18px 12px 28px;color:var(--muted);font-size:.85rem}
+.pub-foot a{color:var(--primary-dark);font-weight:700;text-decoration:none}
+.page-head{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+.page-head h1{font-size:1.35rem;color:var(--navy);font-weight:800}
+.page-head p{color:var(--muted);font-size:.9rem;margin-top:2px}
+
+/* ── الروزنامة ── */
+.cal-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.cal-title{font-size:1.2rem;font-weight:800;color:var(--navy);min-width:150px;text-align:center}
+.cal-nav{display:flex;align-items:center;gap:6px}
+.cal-filters{display:flex;gap:8px;flex-wrap:wrap;margin-inline-start:auto;align-items:center}
+.cal-filters select{width:auto;min-width:170px;max-width:100%}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chip{padding:6px 14px;border-radius:18px;border:1.5px solid var(--line);background:#fff;cursor:pointer;font-family:inherit;font-size:.86rem;font-weight:700;color:var(--navy);min-height:34px;transition:all .15s}
+.chip:hover{border-color:var(--primary);color:var(--primary)}
+.chip.active{background:var(--primary);border-color:var(--primary);color:#fff}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.84rem;font-weight:700;color:var(--navy);margin-bottom:10px}
+.legend i{display:inline-block;width:12px;height:12px;border-radius:4px;margin-inline-end:5px;vertical-align:-1px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.cal-hdr{background:var(--primary-soft);color:var(--primary-deep);text-align:center;font-weight:800;padding:10px 2px;font-size:.88rem}
+.cal-day{background:#fff;min-height:108px;padding:6px;cursor:pointer;display:flex;flex-direction:column;gap:3px;min-width:0;transition:background .12s}
+.cal-day:hover{background:var(--primary-soft)}
+.cal-day.other{background:#f3f7f8;cursor:default;pointer-events:none}
+.cal-day.other .dn{color:#5d6b74}
+.cal-day.past{background:#f7f9fa}
+.cal-day.past .dn{color:#4b5a64}
+.cal-day.today{background:var(--gold-soft);box-shadow:inset 0 0 0 2px var(--gold)}
+.cal-day.blocked{background:#fff1f1}
+.dn{font-weight:800;font-size:.95rem;color:var(--navy);width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%}
+.cal-day.today .dn{background:var(--primary);color:#fff}
+.ev{display:block;font-size:.8125rem;font-weight:700;border-radius:6px;padding:2px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5;border-inline-start:4px solid var(--approved);background:#e3f6e9;color:#14532d}
+.ev.pending{border-color:var(--pending);background:#fdf0d5;color:#7c3a06}
+.ev.blk{border-color:var(--blocked);background:#fde2e2;color:#7f1d1d}
+.more{font-size:.8125rem;font-weight:800;color:var(--primary-dark)}
+.day-list .item{border:1px solid var(--line);border-inline-start:5px solid var(--approved);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fff}
+.day-list .item.pending{border-inline-start-color:var(--pending)}
+.day-list .item.blk{border-inline-start-color:var(--blocked);background:#fff5f5}
+.day-list .item b{color:var(--navy)}
+.day-list .meta{display:flex;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:.88rem;margin-top:3px}
+@media(max-width:640px){
+  .cal-day{min-height:62px;padding:3px}
+  .dn{width:24px;height:24px;font-size:.85rem}
+  .ev{padding:0;height:8px;border-radius:4px;border-inline-start-width:0;background:var(--approved)}
+  .ev .t{display:none}
+  .ev.pending{background:var(--pending)}.ev.blk{background:var(--blocked)}
+  .cal-title{width:100%;order:-1}.cal-filters{margin-inline-start:0;width:100%}.cal-filters select{flex:1;min-width:0}
+  .cal-hdr{font-size:.8125rem;padding:8px 0}
+}
+
+/* ── نموذج الحجز ── */
+.form-card{max-width:860px;margin:0 auto 18px}
+.hall-picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px;margin-bottom:6px}
+.hall-pick{display:flex;gap:10px;align-items:flex-start;text-align:start;background:#fff;border:2px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;font-family:inherit;transition:all .12s;min-width:0}
+.hall-pick:hover{border-color:var(--primary)}
+.hall-pick.active{border-color:var(--primary);background:var(--primary-soft);box-shadow:0 0 0 3px rgba(10,124,134,.14)}
+.hall-pick .ic{width:38px;height:38px;border-radius:10px;background:var(--primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.hall-pick b{display:block;color:var(--navy);font-size:.95rem;overflow-wrap:anywhere}
+.hall-pick small{color:var(--muted);font-size:.8125rem}
+.hall-info{display:none;background:var(--primary-soft);border:1px solid #b5e0e4;border-inline-start:5px solid var(--primary);border-radius:12px;padding:12px 16px;margin:12px 0;font-size:.9rem}
+.hall-info.show{display:block}
+.hall-info .row{display:flex;gap:8px;margin-bottom:4px}.hall-info .row b{min-width:84px;color:var(--navy)}
+.switch-row{display:flex;align-items:center;gap:10px;background:var(--gold-soft);border:1.5px solid var(--gold);border-radius:12px;padding:11px 14px;margin-bottom:14px;cursor:pointer;font-weight:800;color:#7c4a03}
+.switch-row input{width:20px;height:20px}
+.dropzone{display:block;border:2px dashed var(--line);border-radius:12px;padding:22px 14px;text-align:center;cursor:pointer;background:#fff;transition:border-color .15s}
+.dropzone:hover{border-color:var(--primary)}
+.dropzone i{font-size:1.8rem;color:var(--primary);display:block;margin-bottom:6px}
+.dropzone input{display:none}
+.att{display:flex;align-items:center;gap:8px;background:var(--primary-soft);border-radius:8px;padding:6px 10px;margin-top:6px;font-size:.88rem}
+.att span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att button{background:none;border:0;color:var(--bad);cursor:pointer;font-size:1rem;min-width:28px;min-height:28px}
+.terms{display:flex;gap:10px;align-items:flex-start;background:var(--primary-soft);border:1.5px solid #b5e0e4;border-radius:12px;padding:12px 14px;margin:14px 0;font-weight:700;color:var(--navy);cursor:pointer}
+.terms input{width:20px;height:20px;margin-top:2px;flex:none}
+.big-btn{width:100%;padding:13px;font-size:1rem}
+.success{text-align:center;padding:34px 18px}
+.success .ok-ic{font-size:3.4rem;color:var(--approved)}
+.req-id{display:inline-block;background:var(--primary-soft);border:2px dashed var(--primary);color:var(--primary-deep);font-size:1.6rem;font-weight:800;letter-spacing:2px;border-radius:12px;padding:8px 22px;margin:12px 0;direction:ltr}
+.detail{width:100%;border-collapse:collapse}
+.detail td{padding:9px 12px;border-bottom:1px solid #e1eff1;vertical-align:top}
+.detail td:first-child{width:36%;background:var(--primary-soft);font-weight:800;color:var(--navy)}
+.row2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+@media(max-width:640px){.row2,.form-grid{grid-template-columns:1fr}.hall-picks{grid-template-columns:1fr}.form-card{margin-bottom:12px}}
