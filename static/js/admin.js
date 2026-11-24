@@ -32,7 +32,7 @@
     if (opt.body && typeof opt.body !== 'string' && !(window.FormData && opt.body instanceof FormData)) { opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(opt.body); }
     return fetch(url, opt).then(function (r) {
       if (r.status === 401) { location.href = '/admin/login?lang=' + (AR ? 'ar' : 'en'); throw new Error('401'); }
-      return r.json().then(function (j) { if (!r.ok) { var e = new Error(j.errorAr || j.error || ('HTTP ' + r.status)); e.status = r.status; throw e; } return j; });
+      return r.json().then(function (j) { if (!r.ok) { var e = new Error((AR ? (j.errorAr || j.error) : (j.errorEn || j.error)) || ('HTTP ' + r.status)); e.status = r.status; throw e; } return j; });
     });
   }
   function post(url, body) { return api(url, { method: 'POST', body: body || {} }); }
@@ -49,7 +49,7 @@
   setInterval(function () { $('clockEl').textContent = ammanNow().replace(' ', ' | '); }, 1000); $('clockEl').textContent = ammanNow().replace(' ', ' | ');
   var TITLES = { home: L('الرئيسية', 'Home'), bookings: L('طلبات الحجز', 'Booking requests'), calview: L('التقويم', 'Calendar'), blocked: L('غير متاح', 'Unavailable'),
     reports: L('التقارير', 'Reports'), halls: L('المباني والمرافق', 'Buildings and facilities'), contacts: L('جهات الاتصال', 'Contacts'),
-    ticker: L('الشريط الإخباري', 'News ticker'), settings: L('الإعدادات', 'Settings'), users: L('المستخدمون والصلاحيات', 'Users and permissions') };
+    ticker: L('الشريط الإخباري', 'News ticker'), links: L('الروابط المختصرة', 'Short links'), archive: L('الأرشفة', 'Archive'), settings: L('الإعدادات', 'Settings'), users: L('المستخدمون والصلاحيات', 'Users and permissions') };
   var loaded = {};
   function showTab(name, force) {
     if (!$('tab-' + name)) name = 'home';
@@ -58,7 +58,7 @@
     $('pageTitle').textContent = TITLES[name] || '';
     if (window.closeSidebar) window.closeSidebar();
     try { history.replaceState(null, '', '#' + name); } catch (e) { /* لا يهم */ }
-    var load = { bookings: loadBookings, calview: loadCal, blocked: loadBlocked, reports: loadReports, halls: loadHalls, contacts: loadContacts, ticker: loadTicker, settings: loadSettings, users: loadUsers, home: loadHome }[name];
+    var load = { bookings: loadBookings, calview: loadCal, blocked: loadBlocked, reports: loadReports, halls: loadHalls, contacts: loadContacts, ticker: loadTicker, links: loadLinks, archive: function () { /* يعمل بالأزرار */ }, settings: loadSettings, users: loadUsers, home: loadHome }[name];
     if (load && (force || !loaded[name] || name === 'home' || name === 'bookings')) { loaded[name] = true; load(); }
     window.scrollTo(0, 0);
   }
@@ -468,6 +468,49 @@
       rssColor: $('tickerRssColor').value, rssFontSize: parseInt($('tickerRssFontSize').value, 10) || 16, rssBold: $('tickerRssBold').checked, logoBetween: $('tickerLogoBetween').checked, pulse: $('tickerPulse').checked,
       pulseSeconds: parseFloat($('tickerPulseSpeed').value) || 1.6, textShadow: $('tickerShadow').value, bgColor: $('tickerBgColor').value, bgOpacity: parseInt($('tickerBgOpacity').value, 10) || 0, textColor: $('tickerTextColor').value })
       .then(function () { toast(L('تم الحفظ', 'Saved')); if (window.reloadTicker) window.reloadTicker(); }).catch(fail);
+  });
+
+  // ───── الروابط المختصرة ─────
+  var links = [];
+  function loadLinks() {
+    api('/api/admin/links').then(function (d) {
+      links = d; var box = $('linksBox'); if (!d.length) { box.innerHTML = empty('link', L('لا روابط مختصرة بعد.', 'No short links yet.')); return; }
+      var cols = [{ h: L('الرابط المختصر', 'Short link'), filter: 'text' }, { h: L('الرابط الأصلي', 'Original link'), filter: 'text' }, { h: L('ملاحظة', 'Note'), filter: 'text' }, { h: L('الحالة', 'Status'), filter: 'select' },
+        { h: L('الضغطات', 'Clicks'), sort: 'num' }, { h: L('آخر ضغطة', 'Last click'), filter: 'text' }, { h: L('إجراءات', 'Actions'), act: true }];
+      var rows = d.map(function (l) { var st = l.active ? L('فعّال', 'Active') : L('موقوف', 'Inactive');
+        return '<tr>' + chk(l.id) + '<td dir="ltr"><a href="' + esc(l.shortUrl) + '" target="_blank" rel="noopener">' + esc(l.shortUrl) + '</a></td><td dir="ltr" style="max-width:320px;overflow-wrap:anywhere">' + esc(l.url) + '</td><td><bdi>' + esc(l.note) + '</bdi></td>' +
+          '<td data-value="' + esc(st) + '"><span class="badge ' + (l.active ? 'badge-approved' : 'badge-cancelled') + '">' + st + '</span></td><td data-value="' + l.clicks + '">' + l.clicks + '</td><td dir="ltr" data-value="' + esc(l.lastClick) + '">' + esc(l.lastClick) + '</td>' +
+          '<td class="act"><div class="action-btns"><button class="btn btn-sm btn-outline" data-lkedit="' + l.id + '" title="' + L('تعديل', 'Edit') + '" aria-label="' + L('تعديل', 'Edit') + '"><i class="fas fa-pen"></i></button></div></td></tr>'; }).join('');
+      box.innerHTML = tableHtml('lk', cols, rows);
+      mount(box, 'lk', [{ id: 'activate', label: L('تفعيل', 'Activate') }, { id: 'deactivate', label: L('إيقاف', 'Deactivate') }, { id: 'delete', label: L('حذف', 'Delete'), danger: true }], function (a, ids) {
+        post('/api/admin/links/bulk', { action: a, ids: ids }).then(function (r) { bulkDone(r); loadLinks(); }).catch(fail); });
+    }).catch(fail);
+  }
+  function openLink(l) {
+    l = l || {}; $('lkTitle').textContent = l.id ? L('تعديل رابط', 'Edit a link') : L('إضافة رابط مختصر', 'Add a short link');
+    $('lkId').value = l.id || ''; $('lkUrl').value = l.url || ''; $('lkSlug').value = l.slug || ''; $('lkNote').value = l.note || ''; $('lkActive').checked = l.id ? !!l.active : true; open('mdLink');
+  }
+  $('linkAdd').addEventListener('click', function () { openLink(); });
+  $('lkSave').addEventListener('click', function () {
+    post('/api/admin/links/save', { id: $('lkId').value ? +$('lkId').value : undefined, url: $('lkUrl').value.trim(), slug: $('lkSlug').value.trim(), note: $('lkNote').value.trim(), active: $('lkActive').checked })
+      .then(function () { toast(L('تم الحفظ', 'Saved')); $('mdLink').classList.remove('open'); loadLinks(); }).catch(fail);
+  });
+  document.addEventListener('click', function (e) { var b = e.target.closest('[data-lkedit]'); if (b) openLink(links.filter(function (l) { return l.id === +b.dataset.lkedit; })[0]); });
+
+  // ───── الأرشفة ─────
+  $('arcPreview').addEventListener('click', function () {
+    var d = $('arcDate').value; if (!d) return toast(L('اختر التاريخ', 'Choose the date'), true);
+    api('/api/admin/archive-preview?before=' + encodeURIComponent(d)).then(function (r) {
+      if (!r.count) { $('arcResult').innerHTML = '<div class="alert alert-info">' + L('لا حجوزات منتهية قبل هذا التاريخ.', 'No bookings ended before this date.') + '</div>'; return; }
+      $('arcResult').innerHTML = '<div class="alert alert-warning"><b>' + r.count + '</b> ' + L('حجز منتهٍ قبل ', 'bookings ended before ') + '<span dir="ltr">' + esc(d) + '</span> (' + L('معتمد ', 'approved ') + r.byStatus.approved + ' · ' + L('مرفوض ', 'rejected ') + r.byStatus.rejected + ' · ' + L('ملغي ', 'cancelled ') + r.byStatus.cancelled + ')</div>' +
+        '<div class="action-btns"><a class="btn btn-primary" href="/api/admin/archive-export?before=' + encodeURIComponent(d) + '"><i class="fas fa-download"></i> ' + L('1) حمِّل الملف', '1) Download the file') + '</a>' +
+        '<input type="text" id="arcConfirm" dir="ltr" placeholder="DELETE" style="max-width:150px" aria-label="' + L('كلمة التأكيد', 'Confirmation word') + '">' +
+        '<button class="btn btn-red" type="button" id="arcDelete"><i class="fas fa-trash"></i> ' + L('2) حذف من النظام', '2) Delete from the system') + '</button></div><p class="hint">' + L('اكتب DELETE (بالإنجليزية) ثم اضغط حذف.', 'Type DELETE and press delete.') + '</p>';
+    }).catch(fail);
+  });
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest('#arcDelete')) return;
+    post('/api/admin/archive-delete', { before: $('arcDate').value, confirm: $('arcConfirm').value.trim() }).then(function (r) { toast(L('حُذف ', 'Deleted ') + r.deleted + L(' حجزاً', ' bookings')); $('arcResult').innerHTML = ''; }).catch(fail);
   });
 
   // ───── تثبيت التطبيق (PWA) ─────

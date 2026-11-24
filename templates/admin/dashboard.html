@@ -80,6 +80,8 @@
       {{ tab_btn('halls', 'halls', 'building', 'المباني والمرافق', 'Buildings and facilities') }}
       {{ tab_btn('contacts', 'contacts', 'address-book', 'جهات الاتصال', 'Contacts') }}
       {{ tab_btn('ticker', 'ticker', 'bullhorn', 'الشريط الإخباري', 'News ticker') }}
+      {{ tab_btn('links', 'links', 'link', 'الروابط المختصرة', 'Short links') }}
+      {{ tab_btn('archive', 'archive', 'box-archive', 'الأرشفة', 'Archive') }}
       {{ tab_btn('settings', ('settings.identity', 'settings.approval', 'settings.reminders'), 'gear', 'الإعدادات', 'Settings') }}
       {% if me.sysadmin %}<button class="nav-item" data-tab="users" type="button"><i class="fas fa-users-gear"></i> <span>{{ 'المستخدمون والصلاحيات' if ar else 'Users and permissions' }}</span></button>{% endif %}
     </div>
@@ -229,6 +231,29 @@
       </div>
     </div>
 
+    <!-- ── الروابط المختصرة ── -->
+    <div class="tab-panel" id="tab-links">
+      <div class="alert alert-info"><i class="fas fa-circle-info"></i> {{ 'رابط قصير مثل acs.edjo.win/1 يحوّل الزائر إلى رابط طويل (ملف على OneDrive أو نموذج...). يُحسب عدد الضغطات.' if ar else 'A short link such as acs.edjo.win/1 sends the visitor to a long link (a OneDrive file, a form...). Clicks are counted.' }}</div>
+      <div class="toolbar"><button class="btn btn-primary" type="button" id="linkAdd"><i class="fas fa-plus"></i> {{ 'إضافة رابط' if ar else 'Add a link' }}</button></div>
+      <div id="linksBox"></div>
+    </div>
+
+    <!-- ── الأرشفة ── -->
+    <div class="tab-panel" id="tab-archive">
+      <div class="card" style="border:2px solid #d97706">
+        <div class="card-title" style="color:#92400e"><i class="fas fa-box-archive"></i> {{ 'أرشفة الحجوزات القديمة' if ar else 'Archive old bookings' }}</div>
+        <p class="hint" style="margin-bottom:12px">{{ 'لتخفيف حجم البيانات: حمِّل الحجوزات المنتهية قبل تاريخ معيّن في ملف، ثم احذفها من النظام. لا يشمل ذلك الطلبات قيد المراجعة. الحذف لا يُتراجع عنه، فتأكد من نجاح تحميل الملف أولاً.' if ar else 'To lighten the data: download the bookings that ended before a date as a file, then delete them from the system. Pending requests are never included. Deleting cannot be undone, so make sure the file downloaded first.' }}</p>
+        <div class="form-group" style="max-width:260px"><label for="arcDate">{{ 'الحجوزات المنتهية قبل تاريخ' if ar else 'Bookings that ended before' }}</label><input type="date" id="arcDate"></div>
+        <div class="action-btns"><button class="btn btn-outline" type="button" id="arcPreview"><i class="fas fa-magnifying-glass"></i> {{ 'معاينة' if ar else 'Preview' }}</button></div>
+        <div id="arcResult" style="margin-top:14px"></div>
+      </div>
+      {% if me.sysadmin %}
+      <div class="card"><div class="card-title"><i class="fas fa-file-zipper"></i> {{ 'نسخة كاملة من البيانات' if ar else 'A full copy of the data' }}</div>
+        <p class="hint" style="margin-bottom:10px">{{ 'ملف واحد فيه القاعدة وكل المرفقات لاسترجاع النظام كاملاً (لمدير النظام فقط).' if ar else 'One file with the database and every attachment, to restore the whole system (system administrator only).' }}</p>
+        <a class="btn btn-primary" href="/api/admin/full-export"><i class="fas fa-download"></i> {{ 'حمِّل نسخة كاملة' if ar else 'Download a full copy' }}</a></div>
+      {% endif %}
+    </div>
+
     <!-- ── الإعدادات ── -->
     <div class="tab-panel" id="tab-settings">
       <div class="card" data-perm="settings.identity">
@@ -368,6 +393,17 @@
     <div class="perm-grid">{% for p in catalogue %}<label><input type="checkbox" class="perm" value="{{ p.key }}"> <span>{{ p.ar if ar else p.en }}</span></label>{% endfor %}</div>
   </div>
   <div class="modal-footer"><button class="btn btn-primary" type="button" id="uSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ' if ar else 'Save' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
+</div></div>
+
+<div class="modal-overlay" id="mdLink"><div class="modal" style="max-width:560px"><div class="modal-title" id="lkTitle"></div>
+  <input type="hidden" id="lkId">
+  <div class="form-group"><label for="lkUrl">{{ 'الرابط الأصلي' if ar else 'Original link' }} *</label><input type="url" id="lkUrl" dir="ltr" placeholder="https://"></div>
+  <div class="form-grid">
+    <div class="form-group"><label for="lkSlug">{{ 'الاسم المختصر (فارغ = رقم تلقائي)' if ar else 'Short name (empty = next number)' }}</label><input type="text" id="lkSlug" dir="ltr" maxlength="60"></div>
+    <div class="form-group"><label for="lkNote">{{ 'ملاحظة' if ar else 'Note' }}</label><input type="text" id="lkNote" maxlength="300"></div>
+  </div>
+  <label class="check-line"><input type="checkbox" id="lkActive" checked> <span>{{ 'فعّال' if ar else 'Active' }}</span></label>
+  <div class="modal-footer"><button class="btn btn-primary" type="button" id="lkSave"><i class="fas fa-floppy-disk"></i> {{ 'حفظ' if ar else 'Save' }}</button><button class="btn btn-outline" type="button" data-close>{{ 'إلغاء' if ar else 'Cancel' }}</button></div>
 </div></div>
 
 <div class="modal-overlay" id="mdDay"><div class="modal"><div class="modal-title" id="dayTitle" dir="ltr" style="text-align:start"></div><div class="day-list" id="dayList"></div>

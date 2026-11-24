@@ -357,3 +357,16 @@ def email_action(kind, req_id):
             svc.apply_status(b, 'rejected', reason=reason, by='من رابط البريد')
         return render_template('action.html', lang=lang, b=b, kind=kind, done='ok')
     return render_template('action.html', lang=lang, b=b, kind=kind, done='already' if b.status != 'pending' else None)
+
+
+# ───────────── الروابط المختصرة: /<الاسم> يحوّل إلى الرابط الأصلي ─────────────
+@public_bp.route('/<slug>')
+def short_link(slug):
+    from models import ShortLink
+    link = ShortLink.query.filter(db.func.lower(ShortLink.slug) == slug.lower()).first()
+    if not link or not link.active or not re.match(r'^https?://', link.url or ''):
+        abort(404)
+    link.clicks = (link.clicks or 0) + 1
+    link.last_click = datetime.utcnow()
+    db.session.commit()
+    return redirect(link.url, code=302)

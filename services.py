@@ -40,9 +40,67 @@ def rate_ok(bucket, limit, window):
     return True
 
 
+# ترجمة رسائل الخادم الثابتة: يختار المتصفح errorEn في الواجهة الإنجليزية
+EN_MSG = {
+    'طلبات رفع كثيرة، حاول لاحقاً': 'Too many uploads, try again later',
+    'طلبات كثيرة، حاول لاحقاً': 'Too many requests, try again later',
+    'محاولات كثيرة، حاول لاحقاً': 'Too many attempts, try again later',
+    'فشل رفع الملف': 'The file could not be uploaded',
+    'نوع الملف غير مسموح به': 'This file type is not allowed',
+    'الملف كبير جداً': 'The file is too large',
+    'الاسم وعنوان المناسبة مطلوبان': 'The name and the event title are required',
+    'البريد الإلكتروني غير صالح': 'The email address is not valid',
+    'تاريخ غير صالح': 'The date is not valid',
+    'تاريخ الانتهاء يجب أن يكون بعد البداية': 'The end date must be after the start date',
+    'مدة الحجز أطول من المسموح': 'The booking period is too long',
+    'المبنى أو المرفق غير صحيح': 'The building or facility is not valid',
+    'وقت البداية مطلوب': 'The start time is required',
+    'وقت النهاية يجب أن يكون بعد البداية': 'The end time must be after the start time',
+    'لا يمكن الحجز بتاريخ سابق': 'A past date cannot be booked',
+    'محجوز يوم كامل في هذا التاريخ': 'It is booked for the whole day on this date',
+    'لا يمكن حجز يوم كامل، يوجد حجز في هذا التاريخ': 'A full day cannot be booked: there is a booking on this date',
+    'لم يتم العثور على الحجز أو البريد غير مطابق': 'The booking was not found or the email does not match',
+    'لا يمكن تعديل هذا الحجز': 'This booking cannot be amended',
+    'هذا الحجز ملغي بالفعل': 'This booking is already cancelled',
+    'شهر غير صالح': 'The month is not valid',
+    'غير موجود': 'Not found',
+    'سبب الرفض مطلوب': 'The rejection reason is required',
+    'لم يُحدَّد أي حجز': 'No booking was selected',
+    'لم يُحدَّد أي عنصر': 'Nothing was selected',
+    'إجراء غير معروف': 'Unknown action',
+    'الوقت غير صالح': 'The time is not valid',
+    'الاسم بالعربية مطلوب': 'The Arabic name is required',
+    'يوجد مبنى أو مرفق بهذا الاسم': 'A building or facility with this name already exists',
+    'لا يمكن إيقاف آخر مبنى أو مرفق فعّال': 'The last active building or facility cannot be deactivated',
+    'له حجوزات؛ أوقفه بدل حذفه': 'It has bookings: deactivate it instead of deleting it',
+    'لا يمكن حذف آخر مبنى أو مرفق فعّال': 'The last active building or facility cannot be deleted',
+    'بيانات غير صالحة': 'The data is not valid',
+    'هذا البريد مسجّل مسبقاً': 'This email is already listed',
+    'كلمة المرور 8 أحرف على الأقل': 'The password needs at least 8 characters',
+    'كلمة المرور الجديدة 8 أحرف على الأقل': 'The new password needs at least 8 characters',
+    'كلمة المرور الحالية غير صحيحة': 'The current password is not correct',
+    'اسم المستخدم مستخدم مسبقاً': 'This username is already used',
+    'لا يمكن إيقاف آخر مدير للنظام أو سحب صلاحيته': 'The last system administrator cannot be deactivated or lose the role',
+    'لا يمكن إيقاف حسابك الحالي': 'Your own account cannot be deactivated',
+    'لا يمكن حذف حسابك الحالي': 'Your own account cannot be deleted',
+    'لا يمكن حذف آخر مدير للنظام': 'The last system administrator cannot be deleted',
+    'اللون غير صالح': 'The color is not valid',
+    'لم يُحدَّد ملف': 'No file was selected',
+    'تعليق فارغ': 'The comment is empty',
+    'لا تملك صلاحية لهذا الإعداد': 'You do not have permission for this setting',
+    'لا تملك صلاحية تعديل الهوية': 'You do not have permission to edit the identity',
+    'صيغة الشعار غير مدعومة (PNG أو JPG أو WEBP أو SVG).': 'The logo format is not supported (PNG, JPG, WEBP or SVG).',
+    'الرابط يجب أن يبدأ بـ http أو https': 'The link must start with http or https',
+    'الاسم المختصر غير صالح أو محجوز': 'The short name is not valid or is reserved',
+    'هذا الاسم المختصر مستخدم': 'This short name is already used',
+    'اكتب التاريخ': 'Enter the date',
+    'اكتب كلمة التأكيد': 'Type the confirmation word',
+}
+
+
 def err_json(msg_ar, code=400):
     from flask import jsonify
-    return jsonify({'error': msg_ar}), code
+    return jsonify({'error': msg_ar, 'errorEn': EN_MSG.get(msg_ar, '')}), code
 
 
 def txt(value, limit):

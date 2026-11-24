@@ -10,6 +10,8 @@ CATALOGUE = {
     'halls': ('المباني والمرافق', 'Buildings and facilities', 'admin'),
     'contacts': ('جهات الاتصال', 'Contacts', 'admin'),
     'ticker': ('الشريط الإخباري', 'News ticker', 'admin'),
+    'links': ('الروابط المختصرة', 'Short links', 'admin'),
+    'archive': ('الأرشفة والنسخة الكاملة', 'Archive and full backup', 'admin'),
     'settings.identity': ('الإعدادات: الهوية والشعار', 'Settings: identity and logo', 'settings'),
     'settings.approval': ('الإعدادات: الاعتماد التلقائي', 'Settings: automatic approval', 'settings'),
     'settings.reminders': ('الإعدادات: التذكيرات', 'Settings: reminders', 'settings'),

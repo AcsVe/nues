@@ -116,6 +116,24 @@ class PasswordReset(db.Model):
     used = db.Column(db.Boolean, default=False)
 
 
+class ShortLink(db.Model):
+    """رابط مختصر: العنوان /<الاسم> يحوّل الزائر إلى رابط آخر (ملف على OneDrive مثلاً)."""
+    __tablename__ = 'short_links'
+    id = db.Column(db.Integer, primary_key=True)
+    slug = db.Column(db.String(60), unique=True, nullable=False)
+    url = db.Column(db.Text, nullable=False)
+    note = db.Column(db.String(300))
+    active = db.Column(db.Boolean, default=True)
+    clicks = db.Column(db.Integer, default=0)
+    last_click = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self, base=''):
+        return {'id': self.id, 'slug': self.slug, 'url': self.url, 'note': self.note or '', 'active': bool(self.active),
+                'clicks': self.clicks or 0, 'lastClick': self.last_click.strftime('%Y-%m-%d %H:%M') if self.last_click else '',
+                'shortUrl': f'{base}/{self.slug}'}
+
+
 class AppSetting(db.Model):
     """إعدادات النظام (اسم المؤسسة، اللون، الشعار...) كمفتاح وقيمة نصية."""
     __tablename__ = 'app_settings'

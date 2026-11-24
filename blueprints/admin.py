@@ -839,3 +839,147 @@ def set_ticker():
         url = mail._clean(data['rssUrl'] or '')
         cfg['rssUrl'] = url if re.match(r'^https?://', url) else ''
     return jsonify(set_ticker_config(cfg))
+
+
+# ───────────── الروابط المختصرة ─────────────
+RESERVED_SLUGS = {'calendar', 'book', 'lookup', 'admin', 'api', 'static', 'uploads', 'action', 'healthz', 'sw.js', 'robots.txt', 'favicon.ico'}
+
+
+def _base_url():
+    return (current_app.config.get('BASE_URL') or request.host_url).rstrip('/')
+
+
+@api_bp.route('/links')
+@admin_required('links')
+def get_links():
+    from models import ShortLink
+    return jsonify([l.to_dict(_base_url()) for l in ShortLink.query.order_by(ShortLink.id).all()])
+
+
+@api_bp.route('/links/save', methods=['POST'])
+@admin_required('links')
+def save_link():
+    from models import ShortLink
+    d = request.get_json(silent=True) or {}
+    url = txt(d.get('url'), 2000)
+    if not re.match(r'^https?://', url):
+        return err_json('الرابط يجب أن يبدأ بـ http أو https')
+    link = db.session.get(ShortLink, int(d['id'])) if str(d.get('id') or '').isdigit() else None
+    slug = txt(d.get('slug'), 60)
+    if not slug:       # رقم تلقائي تالٍ
+        nums = [int(r[0]) for r in db.session.query(ShortLink.slug).all() if r[0].isdigit()]
+        slug = str(max(nums + [0]) + 1)
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,60}', slug) or slug.lower() in RESERVED_SLUGS:
+        return err_json('الاسم المختصر غير صالح أو محجوز')
+    clash = ShortLink.query.filter(db.func.lower(ShortLink.slug) == slug.lower()).first()
+    if clash and (link is None or clash.id != link.id):
+        return err_json('هذا الاسم المختصر مستخدم')
+    if link is None:
+        link = ShortLink(clicks=0)
+        db.session.add(link)
+    link.slug, link.url, link.note, link.active = slug, url, txt(d.get('note'), 300), bool(d.get('active', True))
+    db.session.commit()
+    return jsonify({'success': True})
+
+
+@api_bp.route('/links/bulk', methods=['POST'])
+@admin_required('links')
+def links_bulk():
+    from models import ShortLink
+    d = request.get_json(silent=True) or {}
+    rows = ShortLink.query.filter(ShortLink.id.in_(_ids(d))).all()
+    action = d.get('action')
+    if not rows or action not in ('activate', 'deactivate', 'delete'):
+        return err_json('لم يُحدَّد أي عنصر')
+    for l in rows:
+        if action == 'delete':
+            db.session.delete(l)
+        else:
+            l.active = action == 'activate'
+    db.session.commit()
+    return jsonify({'success': True, 'done': len(rows)})
+
+
+# ───────────── الأرشفة والنسخة الكاملة ─────────────
+def _old_bookings(before):
+    """الحجوزات المنتهية قبل التاريخ والتي ليست قيد المراجعة (لا يُؤرشف ما ينتظر قراراً)."""
+    return Booking.query.filter(Booking.end_date < before, Booking.status != 'pending').order_by(Booking.start_date).all()
+
+
+@api_bp.route('/archive-preview')
+@admin_required('archive')
+def archive_preview():
+    before = parse_date(request.args.get('before'))
+    if not before:
+        return err_json('اكتب التاريخ')
+    rows = _old_bookings(before)
+    return jsonify({'count': len(rows), 'oldest': rows[0].start_date.strftime('%Y-%m-%d') if rows else '',
+                    'byStatus': {s: sum(1 for r in rows if r.status == s) for s in ('approved', 'rejected', 'cancelled')}})
+
+
+@api_bp.route('/archive-export')
+@admin_required('archive')
+def archive_export():
+    import zipfile
+    before = parse_date(request.args.get('before'))
+    if not before:
+        return err_json('اكتب التاريخ')
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(['req_id', 'status', 'name', 'email', 'phone', 'title', 'hall', 'start_date', 'end_date', 'start_time', 'end_time', 'full_day', 'notes', 'comments'])
+    for b in _old_bookings(before):
+        cm = ' | '.join(c.body for c in BookingComment.query.filter_by(booking_id=b.id).order_by(BookingComment.id).all())
+        w.writerow([_csv_cell(x) for x in (b.req_id, b.status, b.full_name, b.email, b.phone, b.title, b.hall_name, b.start_date, b.end_date,
+                                          b.start_time, b.end_time, 'yes' if b.full_day else 'no', b.notes, cm)])
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('bookings.csv', '﻿' + out.getvalue())
+    return Response(buf.getvalue(), mimetype='application/zip', headers={'Content-Disposition': f'attachment; filename="archive_before_{before}.zip"'})
+
+
+@api_bp.route('/archive-delete', methods=['POST'])
+@admin_required('archive')
+def archive_delete():
+    d = request.get_json(silent=True) or {}
+    before = parse_date(d.get('before'))
+    if not before:
+        return err_json('اكتب التاريخ')
+    if d.get('confirm') != 'DELETE':
+        return err_json('اكتب كلمة التأكيد')
+    rows = _old_bookings(before)
+    for b in rows:
+        BookingReminder.query.filter_by(booking_id=b.id).delete()
+        BookingComment.query.filter_by(booking_id=b.id).delete()
+        db.session.delete(b)
+    db.session.commit()
+    return jsonify({'success': True, 'deleted': len(rows)})
+
+
+@api_bp.route('/full-export')
+@admin_required(sysadmin=True)
+def full_export():
+    """نسخة كاملة: القاعدة (نسخة متسقة) والمرفقات، في ملف واحد."""
+    import os
+    import sqlite3
+    import tempfile
+    import zipfile
+    uri = current_app.config['SQLALCHEMY_DATABASE_URI']
+    if not uri.startswith('sqlite:///'):
+        return err_json('النسخة الكاملة متاحة لقاعدة SQLite فقط')
+    src_path = uri[len('sqlite:///'):]
+    with tempfile.TemporaryDirectory() as tmp:
+        copy = os.path.join(tmp, 'acs_venues.db')
+        a, b = sqlite3.connect(src_path), sqlite3.connect(copy)
+        a.backup(b)
+        b.close()
+        a.close()
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+            z.write(copy, 'acs_venues.db')
+            up = current_app.config['UPLOAD_FOLDER']
+            for root, _d, files in os.walk(up):
+                for f in files:
+                    full = os.path.join(root, f)
+                    z.write(full, os.path.join('uploads', os.path.relpath(full, up)))
+    return Response(buf.getvalue(), mimetype='application/zip',
+                    headers={'Content-Disposition': f'attachment; filename="acs-backup-{datetime.now():%Y%m%d-%H%M}.zip"'})

@@ -20,8 +20,8 @@ def book(client, **kw):
     return client.post('/api/submit_booking', json=body)
 
 
-def post(c, url, **body):
-    return c.post(url, json=body, headers=c.headers)
+def post(c, _path, **body):
+    return c.post(_path, json=body, headers=c.headers)
 
 
 def test_pages_open(client):
@@ -351,3 +351,49 @@ def test_database_migration_adds_missing_columns_with_defaults(app):
         db.session.execute(text('DROP TABLE halls'))
         db.session.execute(text('ALTER TABLE halls_old RENAME TO halls'))
         db.session.commit()
+
+
+def test_short_links(admin, client):
+    assert post(admin, '/api/admin/links/save', url='ftp://x').status_code == 400
+    assert post(admin, '/api/admin/links/save', url='https://example.org/f', slug='calendar').status_code == 400      # محجوز
+    assert post(admin, '/api/admin/links/save', url='https://example.org/file').status_code == 200                   # رقم تلقائي
+    link = next(l for l in admin.get('/api/admin/links').get_json() if l['url'] == 'https://example.org/file')
+    assert link['slug'].isdigit()
+    r = client.get('/' + link['slug'])
+    assert r.status_code == 302 and r.headers['Location'] == 'https://example.org/file'
+    assert next(l for l in admin.get('/api/admin/links').get_json() if l['id'] == link['id'])['clicks'] == 1
+    assert post(admin, '/api/admin/links/save', url='https://example.org/other', slug=link['slug']).status_code == 400
+    post(admin, '/api/admin/links/bulk', action='deactivate', ids=[link['id']])
+    assert client.get('/' + link['slug']).status_code == 404
+    assert client.get('/no-such-link').status_code == 404
+    post(admin, '/api/admin/links/bulk', action='delete', ids=[link['id']])
+
+
+def test_archive_flow(admin, client):
+    rid = book(client, bookingDate=day(60)).get_json()['reqId']
+    post(admin, f'/api/admin/cancel/{rid}')
+    before = day(400)
+    pre = admin.get('/api/admin/archive-preview?before=' + before).get_json()
+    assert pre['count'] >= 1
+    zipped = admin.get('/api/admin/archive-export?before=' + before)
+    assert zipped.status_code == 200 and zipped.data[:2] == b'PK'
+    assert post(admin, '/api/admin/archive-delete', before=before).status_code == 400          # بلا تأكيد
+    pending = book(client, bookingDate=day(61)).get_json()['reqId']
+    done = post(admin, '/api/admin/archive-delete', before=before, confirm='DELETE').get_json()['deleted']
+    assert done >= 1
+    rows = {b['reqId'] for b in admin.get('/api/admin/bookings').get_json()}
+    assert rid not in rows and pending in rows                                                  # قيد المراجعة لا يُؤرشف
+
+
+def test_full_export_sysadmin_only(app, admin):
+    z = admin.get('/api/admin/full-export')
+    assert z.status_code == 200 and z.data[:2] == b'PK'
+    post(admin, '/api/admin/users/add', username='arch1', password='long-enough-1', perms=['archive'])
+    u = login(app, 'arch1', 'long-enough-1')
+    assert u.get('/api/admin/full-export').status_code == 403
+    assert u.get('/api/admin/archive-preview?before=' + day(1)).status_code == 200
+
+
+def test_server_errors_have_english(client):
+    j = book(client, email='x').get_json()
+    assert j['error'] and j['errorEn'] == 'The email address is not valid'

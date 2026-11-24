@@ -64,7 +64,7 @@
       rd.onload = function (ev) {
         var b64 = String(ev.target.result).split(',')[1] || '';
         fetch('/api/upload', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fileName: f.name, dataBase64: b64 }) })
-          .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ''); return j; }); })
+          .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error((AR ? j.error : (j.errorEn || j.error)) || ''); return j; }); })
           .then(function (j) { attachments.push({ name: j.name || f.name, url: j.url }); renderAtt(); })
           .catch(function (er) { alertBox(f.name + ': ' + (er.message || L('تعذّر رفع الملف', 'The file could not be uploaded'))); });
       };
@@ -91,7 +91,7 @@
       fullName: name, email: email, phone: $('fPhone').value.trim(), onBehalf: $('fBehalf').value.trim(), eventTitle: title, hall: chosen,
       bookingDate: date, endDate: end, startTime: s, endTime: en, fullDay: full, notes: $('fNotes').value.trim(), ccEmails: $('fCC').value.trim(),
       reminderAt: $('fRemind').value, attUrls: attachments.map(function (a) { return a.url; }) }) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ''); return j; }); })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error((AR ? j.error : (j.errorEn || j.error)) || ''); return j; }); })
       .then(function (j) {
         $('bookForm').hidden = true; $('done').hidden = false; $('reqId').textContent = j.reqId;
         $('doneTitle').textContent = j.status === 'approved' ? L('تمّت الموافقة على حجزك', 'Your booking is approved') : L('تم استلام طلبك بنجاح', 'Your request was received');

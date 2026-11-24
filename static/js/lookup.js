@@ -11,7 +11,7 @@
   function say(id, msg, type) { $(id).innerHTML = msg ? '<div class="alert alert-' + (type || 'error') + '" role="alert">' + esc(msg) + '</div>' : ''; }
   function api(url, body) {
     return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ''); return j; }); });
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error((AR ? j.error : (j.errorEn || j.error)) || ''); return j; }); });
   }
   fetch('/api/halls').then(function (r) { return r.json(); }).then(function (h) {
     halls = h; $('eHall').innerHTML = h.map(function (x) { return '<option value="' + esc(x.nameAr) + '">' + esc(AR ? x.nameAr : (x.nameEn || x.nameAr)) + '</option>'; }).join('');
