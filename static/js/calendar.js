@@ -88,8 +88,8 @@
         (x.fromTime ? '<span dir="ltr">' + esc(x.fromTime) + ' - ' + esc(x.toTime) + '</span>' : '<span>' + L('يوم كامل', 'Full day') + '</span>') + '</div></div>';
     });
     bk.forEach(function (b) {
-      h += '<div class="item ' + (b.status === 'pending' ? 'pending' : '') + '"><b><bdi>' + esc(b.title) + '</bdi></b><div class="meta"><span><i class="fas fa-building"></i> <bdi>' + esc(nameOf(b.hall)) + '</bdi></span>' +
-        '<span dir="ltr"><i class="fas fa-clock"></i> ' + esc(timeText(b)) + '</span>' + (b.name ? '<span><i class="fas fa-user"></i> <bdi>' + esc(b.name) + '</bdi></span>' : '') +
+      h += '<div class="item ' + (b.status === 'pending' ? 'pending' : '') + '"><b><bdi>' + esc(b.title || L('محجوز', 'Booked')) + '</bdi></b><div class="meta"><span><i class="fas fa-building"></i> <bdi>' + esc(nameOf(b.hall)) + '</bdi></span>' +
+        '<span dir="ltr"><i class="fas fa-clock"></i> ' + esc(timeText(b)) + '</span>' +
         '<span class="badge ' + (b.status === 'pending' ? 'badge-pending' : 'badge-approved') + '">' + (b.status === 'pending' ? L('قيد المراجعة', 'Pending') : L('معتمد', 'Approved')) + '</span></div></div>';
     });
     if (!h) h = '<p class="muted" style="text-align:center;padding:18px">' + L('لا توجد حجوزات في هذا اليوم.', 'No bookings on this day.') + '</p>';

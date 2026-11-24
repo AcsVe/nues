@@ -466,3 +466,18 @@ def test_ticket_and_ics(client):
     body = ics.data.decode()
     assert 'BEGIN:VEVENT' in body and 'DTSTART;TZID=Asia/Amman:' in body and j['reqId'] in body
     assert client.get('/ticket/x.ics').status_code == 404
+
+
+def test_public_calendar_hides_private_details(admin, client):
+    j = book(client, bookingDate=day(14), startTime='13:00', endTime='14:00', eventTitle='اجتماع سري', fullName='سامي السري',
+             onBehalf='جهة خاصة').get_json()
+    raw = str(client.get(f'/api/range_data?from={day(13)}&to={day(15)}').get_json())
+    assert 'اجتماع سري' not in raw and 'سامي السري' not in raw and 'جهة خاصة' not in raw and j['reqId'] not in raw
+    assert "'13:00'" in raw                                                    # الموعد يظهر ليعرف الزائر ما هو محجوز
+    month = str(client.get(f'/api/month_data?year={date.today().year}&month={(date.today() + timedelta(days=14)).month}').get_json())
+    assert 'سامي السري' not in month and j['reqId'] not in month
+    post(admin, '/api/admin/settings', publicShowDetails=True)
+    shown = client.get(f'/api/range_data?from={day(13)}&to={day(15)}').get_json()
+    flat = str(shown)
+    assert any(b['title'] == 'اجتماع سري' for b in shown['bookings']) and 'سامي السري' not in flat and j['reqId'] not in flat   # العنوان فقط بقرار المدير
+    post(admin, '/api/admin/settings', publicShowDetails=False)

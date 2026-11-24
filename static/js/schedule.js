@@ -13,7 +13,7 @@
   var DAYS_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   var halls = [], data = { bookings: [], blocked: {} }, view = 'day', cat = '', hallSel = '';
   var today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Amman' }).format(new Date());
-  var cur = today, lastKey = '';
+  var cur = today, lastKey = '', uid = 0;
 
   function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
   function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -62,12 +62,12 @@
       if (b.hall !== hallAr || b.date > ds || b.endDate < ds) return;
       var multi = b.endDate !== b.date, s = mins(b.startTime), e = mins(b.endTime);
       var full = b.fullDay || multi || s === null;
-      out.push({ kind: 'bk', b: b, full: full, s: full ? 0 : s, e: full ? 1440 : (e === null ? s + 60 : e) });
+      out.push({ uid: ++uid, kind: 'bk', b: b, full: full, s: full ? 0 : s, e: full ? 1440 : (e === null ? s + 60 : e) });
     });
     (data.blocked[ds] || []).forEach(function (x) {
       if (x.hall && x.hall !== hallAr) return;
       var s = mins(x.fromTime), e = mins(x.toTime), full = s === null || e === null;
-      out.push({ kind: 'blk', x: x, full: full, s: full ? 0 : s, e: full ? 1440 : e });
+      out.push({ uid: ++uid, kind: 'blk', x: x, full: full, s: full ? 0 : s, e: full ? 1440 : e });
     });
     return out;
   }
@@ -127,18 +127,18 @@
   }
   function cls(e) { return e.kind === 'blk' ? 'blk' : (e.b.status === 'pending' ? 'pending' : ''); }
   function inner(e, h) {
-    var t = e.kind === 'blk' ? e.x.reason : e.b.title, tm = hm(e.s) + '–' + hm(Math.min(e.e, 1439));
+    var t = e.kind === 'blk' ? e.x.reason : (e.b.title || L('محجوز', 'Booked')), tm = hm(e.s) + '–' + hm(Math.min(e.e, 1439));
     return '<b><bdi>' + esc(t) + '</bdi></b>' + (h > 40 ? '<span dir="ltr">' + tm + '</span>' : '');
   }
-  function chip(e) { var all = $('sched'); return '<button type="button" class="sc-chip ' + cls(e) + '" data-full="' + (e.kind === 'blk' ? 'x' + (e.x.reason || '') : 'b' + e.b.reqId) + '"><bdi>' + esc(e.kind === 'blk' ? e.x.reason : e.b.title) + '</bdi></button>'; }
+  function chip(e) { var all = $('sched'); return '<button type="button" class="sc-chip ' + cls(e) + '" data-full="' + e.uid + '"><bdi>' + esc(e.kind === 'blk' ? e.x.reason : (e.b.title || L('محجوز', 'Booked'))) + '</bdi></button>'; }
 
   function openModal(html, ttl) { $('scMTitle').textContent = ttl; $('scMBody').innerHTML = html; $('scModal').classList.add('open'); }
   function detail(e) {
     if (e.kind === 'blk') return '<div class="item blk"><b><i class="fas fa-ban"></i> ' + esc(e.x.reason) + '</b><div class="meta"><span>' + (e.x.hall ? esc(nameOf(e.x.hall)) : L('كل المباني والمرافق', 'All buildings and facilities')) + '</span>' +
       (e.x.fromTime ? '<span dir="ltr">' + esc(e.x.fromTime) + ' - ' + esc(e.x.toTime) + '</span>' : '<span>' + L('يوم كامل', 'Full day') + '</span>') + '</div></div>';
     var b = e.b;
-    return '<div class="item ' + (b.status === 'pending' ? 'pending' : '') + '"><b><bdi>' + esc(b.title) + '</bdi></b><div class="meta"><span><i class="fas fa-building"></i> <bdi>' + esc(nameOf(b.hall)) + '</bdi></span>' +
-      '<span dir="ltr"><i class="fas fa-clock"></i> ' + (b.fullDay ? esc(L('يوم كامل', 'Full day')) : esc(b.startTime + (b.endTime ? ' - ' + b.endTime : ''))) + '</span>' + (b.name ? '<span><i class="fas fa-user"></i> <bdi>' + esc(b.name) + '</bdi></span>' : '') +
+    return '<div class="item ' + (b.status === 'pending' ? 'pending' : '') + '"><b><bdi>' + esc(b.title || L('محجوز', 'Booked')) + '</bdi></b><div class="meta"><span><i class="fas fa-building"></i> <bdi>' + esc(nameOf(b.hall)) + '</bdi></span>' +
+      '<span dir="ltr"><i class="fas fa-clock"></i> ' + (b.fullDay ? esc(L('يوم كامل', 'Full day')) : esc(b.startTime + (b.endTime ? ' - ' + b.endTime : ''))) + '</span>' + 
       '<span class="badge ' + (b.status === 'pending' ? 'badge-pending' : 'badge-approved') + '">' + (b.status === 'pending' ? L('قيد المراجعة', 'Pending') : L('معتمد', 'Approved')) + '</span></div></div>';
   }
 
@@ -147,7 +147,7 @@
     if (b) { var p = b.dataset.i.split('|'), e = box._all[+p[0]][+p[1]]; return openModal(detail(e), e.kind === 'blk' ? L('فترة غير متاحة', 'Unavailable') : L('تفاصيل الحجز', 'Booking details')); }
     var c = ev.target.closest('.sc-chip');
     if (c) {
-      var found = null; box._all.forEach(function (evs) { evs.forEach(function (e) { if (e.full && (e.kind === 'blk' ? 'x' + (e.x.reason || '') : 'b' + e.b.reqId) === c.dataset.full) found = found || e; }); });
+      var found = null; box._all.forEach(function (evs) { evs.forEach(function (e) { if (e.full && String(e.uid) === c.dataset.full) found = found || e; }); });
       if (found) return openModal(detail(found), found.kind === 'blk' ? L('فترة غير متاحة', 'Unavailable') : L('تفاصيل الحجز', 'Booking details'));
     }
     var col = ev.target.closest('.sc-col');

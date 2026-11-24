@@ -384,10 +384,13 @@ def _range_payload(month_start, month_end):
     bookings = Booking.query.filter(Booking.start_date <= month_end, Booking.end_date >= month_start,
                                     ~Booking.status.in_(['rejected', 'cancelled'])).all()
     cats = {h.name_ar: h.category or 'hall' for h in Hall.query.all()}
-    bk = [{'reqId': b.req_id, 'title': b.title, 'hall': b.hall_name, 'category': cats.get(b.hall_name, 'hall'),
+    # سرّية الحجوزات: الروزنامة العامة لا تعرض رقم الحجز ولا اسم صاحبه ولا من حجز نيابة عنه،
+    # ولا عنوان المناسبة ما لم يفعّل المدير «إظهار عناوين الحجوزات للعموم».
+    show_title = AppSetting.get_bool('public_show_details', False)
+    bk = [{'title': b.title if show_title else '', 'hall': b.hall_name, 'category': cats.get(b.hall_name, 'hall'),
            'date': b.start_date.strftime('%Y-%m-%d'), 'endDate': (b.end_date or b.start_date).strftime('%Y-%m-%d'),
-           'startTime': b.start_time or '', 'endTime': b.end_time or '', 'fullDay': b.full_day, 'status': b.status,
-           'behalf': b.behalf or '', 'name': b.full_name or ''} for b in bookings]
+           'startTime': b.start_time or '', 'endTime': b.end_time or '', 'fullDay': b.full_day, 'status': b.status}
+          for b in bookings]
     blocked = {}
     for bp in BlockedPeriod.query.filter(BlockedPeriod.start_date <= month_end, BlockedPeriod.end_date >= month_start).all():
         cur, last = max(bp.start_date, month_start), min(bp.end_date, month_end)
