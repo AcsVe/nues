@@ -55,6 +55,10 @@
   }
   function timeText(b) { return b.fullDay ? L('يوم كامل', 'Full day') : (b.startTime + (b.endTime ? ' - ' + b.endTime : '')); }
 
+  function countText(n) {
+    if (!AR) return n + (n === 1 ? ' booking' : ' bookings');
+    return n === 1 ? 'حجز واحد' : n === 2 ? 'حجزان' : n <= 10 ? n + ' حجوزات' : n + ' حجزاً';
+  }
   function render() {
     document.getElementById('calTitle').textContent = (AR ? MONTHS_AR : MONTHS_EN)[cur.m - 1] + ' ' + cur.y;
     var first = new Date(cur.y, cur.m - 1, 1).getDay(), days = new Date(cur.y, cur.m, 0).getDate();
@@ -63,13 +67,12 @@
     for (var i = 0; i < first; i++) html += '<div class="cal-day other"><span class="dn">' + (prevDays - first + 1 + i) + '</span></div>';
     for (var d = 1; d <= days; d++) {
       var ds = iso(cur.y, cur.m, d), bk = bookingsOn(ds), bl = blockedOn(ds);
-      var cls = 'cal-day' + (ds === today ? ' today' : '') + (ds < today ? ' past' : '') + (bl.length ? ' blocked' : '');
+      var cls = 'cal-day' + (bk.length || bl.length ? ' has' : '') + (ds === today ? ' today' : '') + (ds < today ? ' past' : '') + (bl.length ? ' blocked' : '');
       html += '<div class="' + cls + '" role="button" tabindex="0" data-date="' + ds + '"><span class="dn">' + d + '</span>';
-      var shown = 0;
-      bl.slice(0, 1).forEach(function (x) { html += '<span class="ev blk"><span class="t">' + esc(x.reason) + '</span></span>'; shown++; });
-      bk.slice(0, 3 - shown).forEach(function (b) { html += '<span class="ev ' + (b.status === 'pending' ? 'pending' : '') + '"><span class="t">' + esc(nameOf(b.hall)) + '</span></span>'; shown++; });
-      var rest = bk.length + bl.length - shown;
-      if (rest > 0) html += '<span class="more">+' + rest + '</span>';
+      var n = bk.length + bl.length, dots = '';
+      bl.slice(0, 4).forEach(function () { dots += '<i class="dot blk"></i>'; });
+      bk.slice(0, 4 - Math.min(bl.length, 4)).forEach(function (b) { dots += '<i class="dot' + (b.status === 'pending' ? ' pending' : '') + '"></i>'; });
+      if (n) html += '<span class="dots">' + dots + '</span><span class="cnt">' + countText(n) + '</span>';
       html += '</div>';
     }
     var tail = (7 - (first + days) % 7) % 7;

@@ -90,3 +90,14 @@
   .cal-hdr{padding:6px 2px}
   .cal-day{min-height:clamp(58px,calc((100vh - 270px) / 6),108px);padding:4px 6px}
 }
+
+/* خلية اليوم: نقاط ملونة وعدد الحجوزات (كروزنامة القاعات المدرسية) */
+.cal-day .dots{display:flex;gap:4px;flex-wrap:wrap}
+.cal-day .dot{width:9px;height:9px;border-radius:50%;background:var(--approved)}
+.cal-day .dot.pending{background:var(--pending)}.cal-day .dot.blk{background:var(--blocked)}
+.cal-day .cnt{font-size:.8125rem;font-weight:800;color:var(--navy)}
+.cal-day.has{background:#eaf6ee}
+.cal-day.has.blocked{background:#fff1f1}
+.cal-day.past{background:#eef1f3}
+.cal-day.past.has{background:#e3efe7}
+.cal-day.today{background:var(--gold-soft)}
