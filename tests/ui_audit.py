@@ -99,7 +99,7 @@ def start_server(data, lang, port):
 
 PORTS = {'ar': 5291, 'en': 5292}
 servers = {k: start_server(os.path.join(OUT, f'data-{k}'), k, p) for k, p in PORTS.items()}
-PUBLIC = ['/calendar', '/book', '/lookup', '/admin/login']
+PUBLIC = ['/calendar', '/schedule', '/book', '/lookup', '/admin/login']
 # فحص لغة الواجهة: النصوص الظاهرة ونصوص الإرشاد (placeholder وtitle وalt وaria-label) — يُنسخ إلى tests/ui_audit.py في كل نظام.
 # يرصد: نصاً يشبه الكود (أسماء متغيرات وملفات وقيم برمجية)، وكلمات عامية أو دخيلة في الواجهة العربية، ونص إرشاد بالإنجليزية
 # في الواجهة العربية أو بالعربية في الإنجليزية، وصورة بلا نص بديل.

@@ -21,6 +21,7 @@ class Hall(db.Model):
     # نوع المبنى أو المرفق: hall قاعة، theater مسرح، field ملعب، gym صالة رياضية، building مبنى، facility مرفق
     category = db.Column(db.String(20), default='hall')
     sort_order = db.Column(db.Integer, default=0)
+    extras = db.Column(db.Text)   # مستلزمات يمكن طلبها مع الحجز، سطر لكل مستلزم
 
 
 CATEGORIES = ('hall', 'theater', 'field', 'gym', 'building', 'facility')
@@ -56,6 +57,10 @@ class Booking(db.Model):
     approved_by = db.Column(db.String(200))
     action_token = db.Column(db.String(64))   # يؤمّن روابط الموافقة والرفض في بريد الإدارة
     staff_reminder_sent = db.Column(db.Boolean, default=False)
+    attendees = db.Column(db.Integer)         # عدد الحضور المتوقع
+    extras = db.Column(db.Text)               # المستلزمات المطلوبة، سطر لكل مستلزم
+    series_id = db.Column(db.String(30))      # معرّف سلسلة الحجز المتكرر (فارغ = حجز منفرد)
+    series_no = db.Column(db.Integer)         # ترتيب الحجز داخل السلسلة
 
 
 class BlockedPeriod(db.Model):

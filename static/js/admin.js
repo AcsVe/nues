@@ -164,7 +164,7 @@
     if (!d.length) { box.innerHTML = empty('inbox', L('لا توجد طلبات.', 'No requests.')); return; }
     var manage = can('bookings.manage');
     var cols = [{ h: L('رقم الطلب', 'ID'), filter: 'text' }, { h: L('مقدّم الطلب', 'Applicant'), filter: 'text' }, { h: L('المناسبة', 'Event'), filter: 'text' }, { h: L('المبنى أو المرفق', 'Building or facility'), filter: 'select' },
-      { h: L('التاريخ', 'Date'), filter: 'text' }, { h: L('الوقت', 'Time'), filter: 'text' }, { h: L('الحالة', 'Status'), filter: 'select' }, { h: L('إجراءات', 'Actions'), act: true }];
+      { h: L('التاريخ', 'Date'), filter: 'text' }, { h: L('الوقت', 'Time'), filter: 'text' }, { h: L('الحضور والمستلزمات', 'Attendance and items'), filter: 'text' }, { h: L('الحالة', 'Status'), filter: 'select' }, { h: L('إجراءات', 'Actions'), act: true }];
     var rows = d.map(function (b) {
       var act = '';
       (b.attachments || []).forEach(function (a) { act += '<a class="btn btn-sm btn-blue" href="' + esc(a) + '" target="_blank" rel="noopener" aria-label="' + L('مرفق', 'Attachment') + '"><i class="fas fa-paperclip"></i></a>'; });
@@ -176,8 +176,9 @@
         if (b.status !== 'pending' && b.status !== 'cancelled') act += '<button class="btn btn-sm btn-outline" data-do="pending" data-id="' + esc(b.reqId) + '" title="' + L('إرجاع إلى قيد المراجعة', 'Back to pending') + '" aria-label="' + L('إرجاع إلى قيد المراجعة', 'Back to pending') + '"><i class="fas fa-rotate-left"></i></button>';
       }
       return '<tr>' + chk(b.reqId) + '<td class="id-cell">' + esc(b.reqId) + '</td><td><bdi>' + esc(b.name) + '</bdi><span class="sub-line" dir="ltr">' + esc(b.email) + '</span>' + (b.behalf ? '<span class="sub-line"><bdi>' + esc(b.behalf) + '</bdi></span>' : '') + '</td>' +
-        '<td><bdi>' + esc(b.title) + '</bdi></td><td data-value="' + esc(hallLabel(b.hall)) + '"><bdi>' + esc(hallLabel(b.hall)) + '</bdi></td>' +
+        '<td><bdi>' + esc(b.title) + '</bdi>' + (b.seriesCount > 1 ? '<span class="sub-line"><i class="fas fa-repeat"></i> ' + L('سلسلة ' + b.seriesNo + ' من ' + b.seriesCount, 'Series ' + b.seriesNo + ' of ' + b.seriesCount) + '</span>' : '') + '</td><td data-value="' + esc(hallLabel(b.hall)) + '"><bdi>' + esc(hallLabel(b.hall)) + '</bdi></td>' +
         '<td data-value="' + esc(b.date) + '" style="white-space:nowrap" dir="ltr">' + esc(dateText(b)) + '</td><td data-value="' + esc(timeText(b)) + '" style="white-space:nowrap"><span dir="ltr">' + esc(timeText(b)) + '</span></td>' +
+        '<td data-value="' + esc((b.attendees || '') + ' ' + (b.extras || []).join(' ')) + '">' + (b.attendees ? '<span dir="ltr">' + esc(b.attendees) + '</span> ' + L('حضور', 'attendees') : '') + (b.extras && b.extras.length ? '<span class="sub-line"><bdi>' + esc(b.extras.join('، ')) + '</bdi></span>' : '') + '</td>' +
         '<td data-value="' + esc(STATUS[b.status] ? STATUS[b.status][0] : b.status) + '">' + badge(b.status) + (b.rejectReason ? '<div class="reasons"><bdi>' + esc(b.rejectReason) + '</bdi></div>' : '') + '</td><td class="act"><div class="action-btns">' + act + '</div></td></tr>';
     }).join('');
     box.innerHTML = tableHtml('bk', cols, rows);
@@ -198,10 +199,12 @@
     var b = e.target.closest('[data-do]');
     if (b) {
       var id = b.dataset.id, what = b.dataset.do;
-      if (what === 'approve') return askText(L('الموافقة على الحجز ', 'Approve booking ') + id, L('بريد إبلاغ إضافي (اختياري، افصل بفاصلة)', 'Extra BCC emails (optional, comma-separated)'), true, function (v) { post('/api/admin/approve/' + encodeURIComponent(id), { extraBcc: v }).then(function () { toast(L('تمت الموافقة', 'Approved')); loadBookings(); loadHome(); }).catch(fail); }, L('موافقة', 'Approve'));
-      if (what === 'reject') { var rj = function (v) { if (!v) { toast(L('اكتب سبب الرفض', 'Write the rejection reason'), true); return; } post('/api/admin/reject/' + encodeURIComponent(id), { reason: v }).then(function () { toast(L('تم الرفض', 'Rejected')); loadBookings(); loadHome(); }).catch(fail); }; return askText(L('رفض الحجز ', 'Reject booking ') + id, L('سبب الرفض', 'Rejection reason'), false, rj, L('رفض', 'Reject')); }
+      var bk0 = bookings.filter(function (x) { return x.reqId === id; })[0], sc = '';
+      if (bk0 && bk0.seriesCount > 1 && what !== 'pending' && confirm(L('هذا الحجز ضمن سلسلة من ' + bk0.seriesCount + ' حجزاً. هل تريد تطبيق الإجراء على السلسلة كلها؟ (إلغاء = هذا الحجز فقط)', 'This booking is part of a series of ' + bk0.seriesCount + '. Apply the action to the whole series? (Cancel = this booking only)'))) sc = 'series';
+      if (what === 'approve') return askText(L('الموافقة على الحجز ', 'Approve booking ') + id, L('بريد إبلاغ إضافي (اختياري، افصل بفاصلة)', 'Extra BCC emails (optional, comma-separated)'), true, function (v) { post('/api/admin/approve/' + encodeURIComponent(id), { extraBcc: v, scope: sc }).then(function () { toast(L('تمت الموافقة', 'Approved')); loadBookings(); loadHome(); }).catch(fail); }, L('موافقة', 'Approve'));
+      if (what === 'reject') { var rj = function (v) { if (!v) { toast(L('اكتب سبب الرفض', 'Write the rejection reason'), true); return; } post('/api/admin/reject/' + encodeURIComponent(id), { reason: v, scope: sc }).then(function () { toast(L('تم الرفض', 'Rejected')); loadBookings(); loadHome(); }).catch(fail); }; return askText(L('رفض الحجز ', 'Reject booking ') + id, L('سبب الرفض', 'Rejection reason'), false, rj, L('رفض', 'Reject')); }
       if (!confirm((what === 'cancel' ? L('إلغاء الحجز ', 'Cancel booking ') : L('إرجاع إلى قيد المراجعة: ', 'Back to pending: ')) + id + '؟')) return;
-      post('/api/admin/' + what + '/' + encodeURIComponent(id)).then(function () { toast(L('تم', 'Done')); loadBookings(); loadHome(); }).catch(fail);
+      post('/api/admin/' + what + '/' + encodeURIComponent(id), { scope: sc }).then(function () { toast(L('تم', 'Done')); loadBookings(); loadHome(); }).catch(fail);
       return;
     }
     var ed = e.target.closest('[data-edit]'); if (ed) return openEditBooking(ed.dataset.edit);
@@ -318,12 +321,12 @@
   function openHall(h) {
     h = h || {}; $('mdHallTitle').textContent = h.id ? L('تعديل مبنى أو مرفق', 'Edit a building or facility') : L('إضافة مبنى أو مرفق', 'Add a building or facility');
     $('hId').value = h.id || ''; $('hNameAr').value = h.nameAr || ''; $('hNameEn').value = h.nameEn || ''; $('hCat').value = h.category || 'hall'; $('hCode').value = h.code || ''; $('hLocation').value = h.location || '';
-    $('hCapacity').value = h.capacity || ''; $('hEquip').value = h.equipment || ''; $('hDesc').value = h.description || ''; $('hNotes').value = h.notes || ''; $('hApproval').checked = !!h.requiresApproval; $('hActive').checked = h.id ? !!h.active : true; open('mdHall');
+    $('hCapacity').value = h.capacity || ''; $('hEquip').value = h.equipment || ''; $('hExtras').value = h.extras || ''; $('hDesc').value = h.description || ''; $('hNotes').value = h.notes || ''; $('hApproval').checked = !!h.requiresApproval; $('hActive').checked = h.id ? !!h.active : true; open('mdHall');
   }
   $('hallAdd').addEventListener('click', function () { openHall(); });
   $('hSave').addEventListener('click', function () {
     var id = $('hId').value, body = { id: id ? +id : undefined, nameAr: $('hNameAr').value.trim(), nameEn: $('hNameEn').value.trim(), category: $('hCat').value, code: $('hCode').value.trim(), location: $('hLocation').value.trim(),
-      capacity: $('hCapacity').value.trim(), equipment: $('hEquip').value.trim(), description: $('hDesc').value.trim(), notes: $('hNotes').value.trim(), requiresApproval: $('hApproval').checked, active: $('hActive').checked };
+      capacity: $('hCapacity').value.trim(), equipment: $('hEquip').value.trim(), extras: $('hExtras').value, description: $('hDesc').value.trim(), notes: $('hNotes').value.trim(), requiresApproval: $('hApproval').checked, active: $('hActive').checked };
     if (!body.nameAr) return toast(L('الاسم بالعربية مطلوب', 'The Arabic name is required'), true);
     post(id ? '/api/admin/halls/update' : '/api/admin/halls/add', body).then(function () { toast(L('تم الحفظ', 'Saved')); $('mdHall').classList.remove('open'); loadHalls(); }).catch(fail);
   });

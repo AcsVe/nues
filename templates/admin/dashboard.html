@@ -318,6 +318,7 @@
     <div class="form-group"><label for="hLocation">{{ 'الموقع' if ar else 'Location' }}</label><input type="text" id="hLocation"></div>
     <div class="form-group"><label for="hCapacity">{{ 'السعة (عدد الأشخاص)' if ar else 'Capacity (people)' }}</label><input type="number" id="hCapacity" min="0" dir="ltr"></div>
   </div>
+  <div class="form-group"><label for="hExtras">{{ 'المستلزمات التي يمكن طلبها (سطر لكل مستلزم)' if ar else 'Items that can be requested (one per line)' }}</label><textarea id="hExtras" rows="3" placeholder="{{ 'كراسٍ إضافية&#10;ميكروفون&#10;ضيافة' if ar else 'Extra chairs&#10;Microphone&#10;Catering' }}"></textarea></div>
   <div class="form-group"><label for="hEquip">{{ 'المعدات والمرافق' if ar else 'Equipment and amenities' }}</label><textarea id="hEquip" rows="2"></textarea></div>
   <div class="form-group"><label for="hDesc">{{ 'الوصف' if ar else 'Description' }}</label><textarea id="hDesc" rows="2"></textarea></div>
   <div class="form-group"><label for="hNotes">{{ 'ملاحظات للمستخدم' if ar else 'Notes for the user' }}</label><textarea id="hNotes" rows="2"></textarea></div>

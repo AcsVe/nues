@@ -1,0 +1,41 @@
+{% extends 'base_public.html' %}
+{% block title %}{{ 'تأكيد الحجز' if lang == 'ar' else 'Booking confirmation' }}{% endblock %}
+{% block content %}
+{% set ar = lang == 'ar' %}
+{% set st = {'approved': ('معتمد', 'Approved'), 'pending': ('قيد المراجعة', 'Pending review'), 'rejected': ('مرفوض', 'Rejected'), 'cancelled': ('ملغي', 'Cancelled')}[b.status] %}
+<div class="ticket" id="ticket">
+  <div class="tk-head">
+    <div class="tk-org">{% include '_brand_logo.html' %}<span><b>{{ brand.org_ar if ar else brand.org_en }}</b><small>{{ 'تأكيد حجز مبنى أو مرفق' if ar else 'Building or facility booking confirmation' }}</small></span></div>
+    <div class="tk-state s-{{ b.status }}">{{ st[0] if ar else st[1] }}</div>
+  </div>
+  <div class="tk-body">
+    <div class="tk-main">
+      <div class="tk-title"><bdi>{{ b.title }}</bdi></div>
+      <table class="detail">
+        <tr><td>{{ 'رقم الحجز' if ar else 'Booking number' }}</td><td dir="ltr"><b>{{ b.req_id }}</b></td></tr>
+        <tr><td>{{ 'المبنى أو المرفق' if ar else 'Building or facility' }}</td><td><bdi>{{ hall.name_ar if ar or not hall or not hall.name_en else hall.name_en }}</bdi>{% if hall and hall.location %} — <bdi>{{ hall.location }}</bdi>{% endif %}</td></tr>
+        <tr><td>{{ 'التاريخ' if ar else 'Date' }}</td><td dir="ltr">{{ b.start_date }}{% if b.end_date and b.end_date != b.start_date %} → {{ b.end_date }}{% endif %}</td></tr>
+        <tr><td>{{ 'الوقت' if ar else 'Time' }}</td><td dir="ltr">{% if b.full_day %}{{ 'يوم كامل' if ar else 'Full day' }}{% else %}{{ b.start_time }}{% if b.end_time %} - {{ b.end_time }}{% endif %}{% endif %}</td></tr>
+        <tr><td>{{ 'مقدّم الطلب' if ar else 'Applicant' }}</td><td><bdi>{{ b.full_name }}</bdi>{% if b.behalf %} ({{ 'نيابة عن' if ar else 'on behalf of' }} <bdi>{{ b.behalf }}</bdi>){% endif %}</td></tr>
+        {% if b.attendees %}<tr><td>{{ 'عدد الحضور' if ar else 'Attendance' }}</td><td dir="ltr">{{ b.attendees }}</td></tr>{% endif %}
+        {% if b.extras %}<tr><td>{{ 'المستلزمات' if ar else 'Requested items' }}</td><td><bdi>{{ b.extras.splitlines()|join('، ' if ar else ', ') }}</bdi></td></tr>{% endif %}
+        {% if series > 1 %}<tr><td>{{ 'سلسلة متكررة' if ar else 'Repeating series' }}</td><td>{{ ('الحجز رقم ' ~ b.series_no ~ ' من ' ~ series) if ar else ('Booking ' ~ b.series_no ~ ' of ' ~ series) }}</td></tr>{% endif %}
+        {% if b.notes %}<tr><td>{{ 'ملاحظات' if ar else 'Notes' }}</td><td><bdi>{{ b.notes }}</bdi></td></tr>{% endif %}
+      </table>
+      {% if hall and hall.notes %}<p class="hint"><bdi>{{ hall.notes }}</bdi></p>{% endif %}
+    </div>
+    <div class="tk-qr"><div id="qr" data-url="{{ url }}" aria-label="{{ 'رمز التحقق' if ar else 'Verification code' }}" role="img"></div>
+      <small>{{ 'امسح الرمز للتحقق من الحجز' if ar else 'Scan to verify the booking' }}</small></div>
+  </div>
+  <div class="tk-foot">{{ 'صدر بتاريخ' if ar else 'Issued on' }} <span dir="ltr">{{ b.created_at.strftime('%Y-%m-%d') if b.created_at else '' }}</span>
+    · {{ 'الحجز صالح فقط إذا كانت حالته «معتمد».' if ar else 'The booking is valid only while its status is “Approved”.' }}</div>
+</div>
+<div class="action-btns no-print" style="justify-content:center;margin-top:14px">
+  <button class="btn btn-primary" type="button" id="tkPrint"><i class="fas fa-print"></i> {{ 'طباعة أو حفظ PDF' if ar else 'Print or save as PDF' }}</button>
+  <a class="btn btn-outline" href="/ticket/{{ b.req_id }}.ics?t={{ request.args.get('t', '') }}"><i class="fas fa-calendar-plus"></i> {{ 'أضف إلى التقويم' if ar else 'Add to calendar' }}</a>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="{{ asset('vendor/qrcode.js') }}"></script>
+<script src="{{ asset('js/ticket.js') }}"></script>
+{% endblock %}

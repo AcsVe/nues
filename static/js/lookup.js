@@ -25,10 +25,14 @@
     var rows = [[L('الاسم', 'Name'), '<bdi>' + esc(b.name) + '</bdi>'], [L('المناسبة', 'Event'), '<bdi>' + esc(b.title) + '</bdi>'], [L('المبنى أو المرفق', 'Building or facility'), '<bdi>' + esc(hallLabel(b.hall)) + '</bdi>'],
       [L('التاريخ', 'Date'), '<span dir="ltr">' + esc(b.date) + (b.endDate !== b.date ? ' → ' + esc(b.endDate) : '') + '</span>'],
       [L('الوقت', 'Time'), b.fullDay ? L('يوم كامل', 'Full day') : '<span dir="ltr">' + esc(b.startTime) + (b.endTime ? ' - ' + esc(b.endTime) : '') + '</span>']];
+    if (b.attendees) rows.push([L('عدد الحضور', 'Attendance'), '<span dir="ltr">' + esc(b.attendees) + '</span>']);
+    if (b.extras && b.extras.length) rows.push([L('المستلزمات', 'Requested items'), '<bdi>' + esc(b.extras.join(AR ? '، ' : ', ')) + '</bdi>']);
+    if (b.seriesCount > 1) rows.push([L('سلسلة متكررة', 'Repeating series'), L('ضمن سلسلة من ' + b.seriesCount + ' حجزاً', 'Part of a series of ' + b.seriesCount + ' bookings')]);
     if (b.status === 'rejected' && b.rejectReason) rows.push([L('سبب الرفض', 'Rejection reason'), '<bdi>' + esc(b.rejectReason) + '</bdi>']);
     $('resTable').innerHTML = rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('');
     var open = b.status === 'pending' || b.status === 'approved';
     $('resActions').innerHTML = open ? '<button class="btn btn-outline" type="button" id="doEdit"><i class="fas fa-pen"></i> ' + L('تعديل', 'Amend') + '</button><button class="btn btn-red" type="button" id="doCancel"><i class="fas fa-ban"></i> ' + L('إلغاء الحجز', 'Cancel the booking') + '</button>' : '';
+    if (b.ticket && b.status !== 'rejected') $('resActions').innerHTML += '<a class="btn btn-green" href="' + esc(b.ticket) + '&lang=' + (AR ? 'ar' : 'en') + '"><i class="fas fa-file-pdf"></i> ' + L('التأكيد الرسمي (طباعة / PDF)', 'Official confirmation (print / PDF)') + '</a>';
     $('result').hidden = false;
   }
   $('lookForm').addEventListener('submit', function (e) {
@@ -44,7 +48,8 @@
     }
     if (e.target.closest('#doCancel')) {
       if (!confirm(L('هل تريد إلغاء هذا الحجز؟', 'Cancel this booking?'))) return;
-      api('/api/cancel_booking_user', { reqId: cur.reqId, email: $('lEmail').value.trim() }).then(function () {
+      var whole = cur.seriesCount > 1 && confirm(L('هذا الحجز ضمن سلسلة متكررة. هل تريد إلغاء الحجوزات القادمة كلها في السلسلة؟ (إلغاء = هذا الحجز فقط)', 'This booking is part of a repeating series. Cancel all the upcoming bookings in the series? (Cancel = this booking only)'));
+      api('/api/cancel_booking_user', { reqId: cur.reqId, email: $('lEmail').value.trim(), series: whole }).then(function () {
         say('lookAlert', L('تم إلغاء الحجز.', 'The booking was cancelled.'), 'success'); $('result').hidden = true; $('editCard').hidden = true;
       }).catch(function (er) { say('lookAlert', er.message); });
     }

@@ -14,6 +14,7 @@
   <div class="req-id" id="reqId"></div>
   <p class="muted">{{ 'احتفظ بهذا الرقم لتعديل الطلب أو إلغائه أو الاستعلام عنه.' if ar else 'Keep this number to amend, cancel or look up the request.' }}</p>
   <div class="action-btns" style="justify-content:center;margin-top:14px">
+    <a class="btn btn-green" id="doneTicket" href="#" hidden><i class="fas fa-file-pdf"></i> {{ 'تأكيد رسمي (طباعة / PDF)' if ar else 'Official confirmation (print / PDF)' }}</a>
     <a class="btn btn-primary" href="/calendar?lang={{ lang }}"><i class="fas fa-calendar-days"></i> {{ 'الروزنامة' if ar else 'Calendar' }}</a>
     <a class="btn btn-outline" href="/lookup?lang={{ lang }}"><i class="fas fa-magnifying-glass"></i> {{ 'الاستعلام عن الحجز' if ar else 'Look up the booking' }}</a>
   </div>
@@ -38,8 +39,21 @@
       <div class="form-group"><label for="fStart">{{ 'من الساعة' if ar else 'From' }} *</label><input type="time" id="fStart" dir="ltr"></div>
       <div class="form-group"><label for="fEnd">{{ 'إلى الساعة' if ar else 'To' }}</label><input type="time" id="fEnd" dir="ltr"></div>
     </div>
+    <div class="form-group"><label for="fRepeat">{{ 'التكرار' if ar else 'Repeat' }}</label>
+      <select id="fRepeat"><option value="none">{{ 'لا يتكرر (مرة واحدة)' if ar else 'Does not repeat' }}</option><option value="daily">{{ 'يومياً' if ar else 'Daily' }}</option><option value="weekly">{{ 'أسبوعياً' if ar else 'Weekly' }}</option><option value="monthly">{{ 'شهرياً' if ar else 'Monthly' }}</option></select></div>
+    <div class="form-grid" id="repeatRow" hidden>
+      <div class="form-group"><label for="fRepUntil">{{ 'ينتهي التكرار في' if ar else 'Repeat until' }}</label><input type="date" id="fRepUntil"></div>
+      <div class="form-group"><label for="fRepCount">{{ 'أو عدد المرات' if ar else 'Or number of times' }}</label><input type="number" id="fRepCount" min="2" max="52" dir="ltr" inputmode="numeric"></div>
+    </div>
+    <p class="hint" id="repeatHint" hidden></p>
     <div class="form-group"><label for="fTitle">{{ 'عنوان المناسبة' if ar else 'Event title' }} *</label>
       <input type="text" id="fTitle" maxlength="200" placeholder="{{ 'مثال: ورشة عمل' if ar else 'e.g. Workshop' }}"></div>
+  </div>
+
+  <div class="card" id="needsCard" hidden>
+    <div class="card-title"><i class="fas fa-people-roof"></i> {{ 'الحضور والمستلزمات' if ar else 'Attendance and Requirements' }}</div>
+    <div class="form-group" style="max-width:280px"><label for="fAttendees">{{ 'عدد الحضور المتوقع' if ar else 'Expected attendance' }}</label><input type="number" id="fAttendees" min="1" max="100000" dir="ltr" inputmode="numeric"><span class="hint" id="capHint"></span></div>
+    <div id="extrasBox" hidden><label style="font-weight:800;color:var(--navy)">{{ 'المستلزمات المطلوبة' if ar else 'Requested items' }}</label><div class="extras" id="extrasList"></div></div>
   </div>
 
   <div class="card">
@@ -69,6 +83,6 @@
 </form>
 {% endblock %}
 {% block extra_scripts %}
-<script>window.PRE_HALL = {{ pre_hall|tojson }};</script>
+<script>window.PRE_HALL = {{ pre_hall|tojson }}; window.PRE_START = {{ pre_start|tojson }};</script>
 <script src="{{ asset('js/book.js') }}"></script>
 {% endblock %}

@@ -157,7 +157,54 @@ def booking_payload(b):
         date_str += f" — {b.end_date.strftime('%Y-%m-%d')}"
     return {'reqId': b.req_id, 'name': b.full_name, 'email': b.email, 'phone': b.phone or '', 'title': b.title,
             'hall': b.hall_name, 'timeStr': time_str, 'dateStr': date_str, 'notes': b.notes or '',
-            'startTime': b.start_time or '', 'endTime': b.end_time or ''}
+            'startTime': b.start_time or '', 'endTime': b.end_time or '',
+            'attendees': b.attendees or '', 'extras': (b.extras or '').replace('\n', '، '),
+            'seriesCount': series_count(b), 'ticketUrl': ticket_url(b)}
+
+
+def series_count(b):
+    return Booking.query.filter_by(series_id=b.series_id).count() if b.series_id else 0
+
+
+def ticket_url(b):
+    base = (current_app.config.get('BASE_URL') or '').rstrip('/')
+    return f'{base}/ticket/{b.req_id}?t={b.action_token}' if base and b.action_token else ''
+
+
+def hall_extras(hall):
+    """قائمة المستلزمات المتاحة للقاعة (سطر لكل مستلزم)."""
+    return [x.strip() for x in (hall.extras or '').splitlines() if x.strip()][:40]
+
+
+def capacity_of(hall):
+    """أول رقم في حقل السعة، أو None إذا لم يُحدَّد رقم."""
+    m = re.search(r'\d+', str(hall.capacity or ''))
+    return int(m.group()) if m else None
+
+
+REPEATS = ('none', 'daily', 'weekly', 'monthly')
+MAX_REPEAT = 52
+
+
+def repeat_dates(start, freq, until=None, count=None):
+    """تواريخ بدايات الحجز المتكرر بدءاً من start (تدخل فيها)، بحد أقصى MAX_REPEAT."""
+    import calendar as _c
+    out, i = [], 0
+    while len(out) < MAX_REPEAT:
+        if freq == 'daily':
+            d = start + timedelta(days=i)
+        elif freq == 'weekly':
+            d = start + timedelta(weeks=i)
+        else:
+            y, m = divmod(start.month - 1 + i, 12)
+            y += start.year
+            m += 1
+            d = start.replace(year=y, month=m, day=min(start.day, _c.monthrange(y, m)[1]))
+        if (until and d > until) or (count and len(out) >= count):
+            break
+        out.append(d)
+        i += 1
+    return out
 
 
 def notify(fn, *args, **kwargs):
@@ -273,6 +320,31 @@ def apply_status(b, status, reason='', by='', extra_bcc=''):
         b.cancel_reason = reason
     db.session.commit()
     send_status_mail(b, status, reason, extra_bcc)
+
+
+def apply_series(b, status, reason='', by='', extra_bcc=''):
+    """يطبّق الحالة على بقية حجوزات السلسلة بصمت ثم يرسل بريداً واحداً عن الحجز المختار.
+    يرجع عدد الحجوزات المتأثرة وقائمة ما تعذّر اعتماده لتعارض."""
+    allowed = {'approved': ('pending',), 'rejected': ('pending',), 'cancelled': ('pending', 'approved'),
+               'pending': ('approved',)}[status]
+    others = Booking.query.filter(Booking.series_id == b.series_id, Booking.id != b.id, Booking.status.in_(allowed)).all()
+    done, skipped = 0, []
+    for o in others:
+        if status == 'approved':
+            clash = Booking.query.filter(Booking.hall_name == o.hall_name, Booking.id != o.id, Booking.status == 'approved',
+                                         Booking.start_date <= (o.end_date or o.start_date), Booking.end_date >= o.start_date).all()
+            if any(o.full_day or c.full_day or times_overlap(o.start_time or '', o.end_time or '', c.start_time or '', c.end_time or '') for c in clash):
+                skipped.append(o.req_id)
+                continue
+        o.status, o.action_date = status, datetime.utcnow()
+        o.reject_reason = reason if status == 'rejected' else ''
+        if status == 'approved':
+            o.approved_by = by or o.approved_by
+        if status == 'cancelled' and reason:
+            o.cancel_reason = reason
+        done += 1
+    apply_status(b, status, reason, by, extra_bcc)
+    return done + 1, skipped
 
 
 def send_status_mail(b, status, reason='', extra_bcc=''):

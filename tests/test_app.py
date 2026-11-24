@@ -397,3 +397,72 @@ def test_full_export_sysadmin_only(app, admin):
 def test_server_errors_have_english(client):
     j = book(client, email='x').get_json()
     assert j['error'] and j['errorEn'] == 'The email address is not valid'
+
+
+def test_range_data_and_pages(client):
+    book(client, bookingDate=day(3))
+    r = client.get(f'/api/range_data?from={day(0)}&to={day(7)}').get_json()
+    assert any(b['hall'] == HALL for b in r['bookings'])
+    assert client.get(f'/api/range_data?from={day(0)}&to={day(200)}').status_code == 400
+    assert client.get('/schedule').status_code == 200
+    assert client.get('/schedule?lang=en&hall=x&date=2026-01-01').status_code == 200
+
+
+def test_attendance_and_extras(admin, client):
+    hall = next(h for h in admin.get('/api/admin/halls').get_json() if h['nameAr'] == HALL)
+    post(admin, '/api/admin/halls/update', **{**hall, 'extras': 'ميكروفون\nكراسٍ إضافية\nميكروفون'})
+    assert next(h for h in client.get('/api/halls').get_json() if h['nameAr'] == HALL)['extras'] == ['ميكروفون', 'كراسٍ إضافية']
+    assert book(client, attendees='500').status_code == 400                          # فوق السعة (100)
+    assert book(client, attendees='abc').status_code == 400
+    assert book(client, extras=['شيء غير موجود']).status_code == 400
+    ok = book(client, attendees='40', extras=['ميكروفون'], bookingDate=day(33))
+    assert ok.status_code == 200
+    row = next(b for b in admin.get('/api/admin/bookings').get_json() if b['reqId'] == ok.get_json()['reqId'])
+    assert row['attendees'] == 40 and row['extras'] == ['ميكروفون']
+
+
+def test_repeat_series(admin, client):
+    r = book(client, bookingDate=day(10), startTime='18:00', endTime='19:00', repeat={'freq': 'weekly', 'count': 4})
+    assert r.status_code == 200 and r.get_json()['count'] == 4
+    rows = [b for b in admin.get('/api/admin/bookings').get_json() if b['seriesId']]
+    assert len(rows) == 4 and {b['seriesCount'] for b in rows} == {4}
+    assert sorted(b['date'] for b in rows) == [day(10 + 7 * i) for i in range(4)]
+    # تعارض أحد التواريخ يرفض الطلب كله
+    clash = book(client, bookingDate=day(3), startTime='18:30', endTime='19:30', repeat={'freq': 'weekly', 'count': 3})
+    assert clash.status_code == 409 and clash.get_json()['conflicts'] == [day(10), day(17)]
+    assert not [b for b in admin.get('/api/admin/bookings').get_json() if b['date'] == day(3) and b['startTime'] == '18:30']
+    assert book(client, bookingDate=day(40), startTime='18:00', endTime='19:00', repeat={'freq': 'weekly'}).status_code == 400       # بلا نهاية
+    assert book(client, bookingDate=day(40), startTime='18:00', endTime='19:00', repeat={'freq': 'yearly', 'count': 3}).status_code == 400
+    # اعتماد السلسلة كلها بإجراء واحد
+    first = next(b for b in rows if b['seriesNo'] == 1)
+    d = post(admin, f"/api/admin/approve/{first['reqId']}", scope='series').get_json()
+    assert d['count'] == 4
+    assert {b['status'] for b in admin.get('/api/admin/bookings').get_json() if b['seriesId'] == first['seriesId']} == {'approved'}
+    # الإلغاء من صاحب الحجز: السلسلة كلها
+    lk = client.post('/api/lookup_booking', json={'reqId': first['reqId'], 'email': 'a@example.org'}).get_json()
+    assert lk['seriesCount'] == 4
+    c = client.post('/api/cancel_booking_user', json={'reqId': first['reqId'], 'email': 'a@example.org', 'series': True}).get_json()
+    assert c['count'] == 4
+    assert {b['status'] for b in admin.get('/api/admin/bookings').get_json() if b['seriesId'] == first['seriesId']} == {'cancelled'}
+
+
+def test_repeat_monthly_clamps_day():
+    from datetime import date as d
+    from services import repeat_dates
+    assert repeat_dates(d(2026, 1, 31), 'monthly', count=3) == [d(2026, 1, 31), d(2026, 2, 28), d(2026, 3, 31)]
+    assert len(repeat_dates(d(2026, 1, 1), 'daily', count=500)) == 52
+
+
+def test_ticket_and_ics(client):
+    j = book(client, bookingDate=day(12)).get_json()
+    url = j['ticket']
+    assert url.startswith('/ticket/')
+    page = client.get(url)
+    assert page.status_code == 200 and j['reqId'].encode() in page.data
+    assert client.get(f"/ticket/{j['reqId']}").status_code == 404                          # بلا رمز
+    assert client.get(f"/ticket/{j['reqId']}?t=wrong").status_code == 404
+    ics = client.get(url.replace(f"/ticket/{j['reqId']}", f"/ticket/{j['reqId']}.ics"))
+    assert ics.status_code == 200 and ics.mimetype == 'text/calendar'
+    body = ics.data.decode()
+    assert 'BEGIN:VEVENT' in body and 'DTSTART;TZID=Asia/Amman:' in body and j['reqId'] in body
+    assert client.get('/ticket/x.ics').status_code == 404
