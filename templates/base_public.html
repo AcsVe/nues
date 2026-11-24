@@ -27,6 +27,8 @@
     <nav class="pub-nav">
       <a class="pn {% if request.endpoint == 'public.calendar' %}active{% endif %}" href="/calendar?lang={{ lang }}">
         <i class="fas fa-calendar-days"></i> {{ 'الروزنامة' if lang == 'ar' else 'Calendar' }}</a>
+      <a class="pn {% if request.endpoint == 'public.schedule' %}active{% endif %}" href="/schedule?lang={{ lang }}">
+        <i class="fas fa-table-cells"></i> {{ 'الجدول' if lang == 'ar' else 'Schedule' }}</a>
       <a class="pn {% if request.endpoint == 'public.book' %}active{% endif %}" href="/book?lang={{ lang }}">
         <i class="fas fa-circle-plus"></i> {{ 'حجز جديد' if lang == 'ar' else 'New booking' }}</a>
       <a class="pn {% if request.endpoint == 'public.lookup' %}active{% endif %}" href="/lookup?lang={{ lang }}">

@@ -1,0 +1,42 @@
+{% extends 'base_public.html' %}
+{% block title %}{{ 'جدول المباني والمرافق' if lang == 'ar' else 'Schedule' }}{% endblock %}
+{% block content %}
+{% set ar = lang == 'ar' %}
+<div class="card sched-card">
+  <div class="cal-bar">
+    <div class="cal-nav">
+      <button class="icon-btn" type="button" id="scPrev" aria-label="{{ 'السابق' if ar else 'Previous' }}"><i class="fas fa-chevron-{{ 'right' if ar else 'left' }}"></i></button>
+      <button class="icon-btn" type="button" id="scNext" aria-label="{{ 'التالي' if ar else 'Next' }}"><i class="fas fa-chevron-{{ 'left' if ar else 'right' }}"></i></button>
+      <button class="btn btn-outline btn-sm" type="button" id="scToday">{{ 'اليوم' if ar else 'Today' }}</button>
+    </div>
+    <div class="cal-title" id="scTitle" aria-live="polite"></div>
+    <div class="seg" role="group" aria-label="{{ 'العرض' if ar else 'View' }}">
+      <button type="button" class="seg-btn active" id="scDay">{{ 'يوم' if ar else 'Day' }}</button>
+      <button type="button" class="seg-btn" id="scWeek">{{ 'أسبوع' if ar else 'Week' }}</button>
+    </div>
+  </div>
+  <div class="cal-bar">
+    <div class="chips" id="scChips" role="group" aria-label="{{ 'النوع' if ar else 'Type' }}"></div>
+    <select id="scHall" aria-label="{{ 'المبنى أو المرفق' if ar else 'Building or facility' }}"></select>
+  </div>
+  <p class="hint" id="scHint"></p>
+  <div class="sched-wrap"><div class="sched" id="sched"></div></div>
+  <div class="legend" style="margin-top:10px">
+    <span><i style="background:var(--approved)"></i>{{ 'معتمد' if ar else 'Approved' }}</span>
+    <span><i style="background:var(--pending)"></i>{{ 'قيد المراجعة' if ar else 'Pending' }}</span>
+    <span><i style="background:var(--blocked)"></i>{{ 'غير متاح' if ar else 'Unavailable' }}</span>
+  </div>
+</div>
+
+<div class="modal-overlay" id="scModal" role="dialog" aria-modal="true" aria-labelledby="scMTitle">
+  <div class="modal">
+    <div class="modal-title" id="scMTitle"></div>
+    <div id="scMBody"></div>
+    <div class="modal-footer"><button class="btn btn-outline" type="button" id="scMClose">{{ 'إغلاق' if ar else 'Close' }}</button></div>
+  </div>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script>window.PRE_DATE = {{ pre_date|tojson }}; window.PRE_HALL = {{ pre_hall|tojson }};</script>
+<script src="{{ asset('js/schedule.js') }}"></script>
+{% endblock %}

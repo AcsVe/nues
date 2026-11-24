@@ -126,9 +126,27 @@ def _badge(text, bg, fg='#fff'):
             f'display:inline-block;font-weight:bold;">{text}</div><br>')
 
 
+def _extra_rows(d):
+    """سطور اختيارية: عدد الحضور والمستلزمات وسلسلة التكرار."""
+    out = []
+    if d.get('attendees'):
+        out.append(('عدد الحضور', d['attendees']))
+    if d.get('extras'):
+        out.append(('المستلزمات', d['extras']))
+    if (d.get('seriesCount') or 0) > 1:
+        out.append(('حجز متكرر', f"سلسلة من {d['seriesCount']} حجزاً"))
+    return out
+
+
+def _rows_with_last(pairs, color=None):
+    """سطور جدول من أزواج (عنوان، قيمة): الأول بلون مميز والأخير بلا حد."""
+    return [_row(k, v, last=(i == len(pairs) - 1), color=color if i == 0 else None) for i, (k, v) in enumerate(pairs)]
+
+
 def _full_rows(d, color):
-    return [_row('رقم الطلب', d['reqId'], color=color), _row('المناسبة', d['title']), _row('القاعة', d['hall']),
-            _row('الوقت والتاريخ', f"{d['timeStr']} | {d['dateStr']}", last=True)]
+    pairs = [('رقم الطلب', d['reqId']), ('المناسبة', d['title']), ('القاعة', d['hall']),
+             ('الوقت والتاريخ', f"{d['timeStr']} | {d['dateStr']}")] + _extra_rows(d)
+    return _rows_with_last(pairs, color)
 
 
 def _send(d, subject_prefix, inner, bcc_list):
@@ -147,7 +165,8 @@ def send_confirm_email(d, bcc_list=None):
 def send_approve_email(d, bcc_list=None):
     inner = (_badge('✔️ تمت الموافقة', '#1e8449') +
              f"مرحباً <strong>{escape(d['name'])}</strong>،<br>يسعدنا إبلاغك بأنه <strong>تمت الموافقة</strong> على طلب حجزك.<br><br>"
-             + _table(_full_rows(d, '#1e8449')))
+             + _table(_full_rows(d, '#1e8449'))
+             + (('<div style="text-align:center;margin:18px 0 4px;">' + _button(d['ticketUrl'], 'التأكيد الرسمي (طباعة / PDF)', '#0A7C86') + '</div>') if d.get('ticketUrl') else ''))
     _send(d, 'موافقة على طلب حجز', inner, bcc_list)
 
 
@@ -203,12 +222,12 @@ def _org():
 
 def send_staff_new_booking(to, d, approve_url=None, reject_url=None):
     """إشعار الإدارة بحجز جديد، ومعه رابطا الموافقة والرفض لمن يملكهما."""
-    rows = [_row('رقم الطلب', d['reqId'], color='#0A7C86'), _row('مقدّم الطلب', d['name']),
-            _row('البريد الإلكتروني', d['email']), _row('الهاتف', d.get('phone') or '-'),
-            _row('المناسبة', d['title']), _row('المبنى أو المرفق', d['hall']),
-            _row('الوقت والتاريخ', f"{d['timeStr']} | {d['dateStr']}", last=not d.get('notes'))]
+    pairs = [('رقم الطلب', d['reqId']), ('مقدّم الطلب', d['name']), ('البريد الإلكتروني', d['email']),
+             ('الهاتف', d.get('phone') or '-'), ('المناسبة', d['title']), ('المبنى أو المرفق', d['hall']),
+             ('الوقت والتاريخ', f"{d['timeStr']} | {d['dateStr']}")] + _extra_rows(d)
     if d.get('notes'):
-        rows.append(_row('ملاحظات', d['notes'], last=True))
+        pairs.append(('ملاحظات', d['notes']))
+    rows = _rows_with_last(pairs, '#0A7C86')
     buttons = ''
     if approve_url and reject_url:
         buttons = ('<div style="text-align:center;margin:22px 0 6px;">' + _button(approve_url, 'موافقة', '#1e8449')

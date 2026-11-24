@@ -7,7 +7,7 @@ import re
 import secrets
 from datetime import date as date_cls, datetime, timedelta
 
-from flask import (Blueprint, abort, current_app, jsonify, redirect, render_template, request, send_from_directory,
+from flask import (Blueprint, Response, abort, current_app, jsonify, redirect, render_template, request, send_from_directory,
                    url_for)
 from werkzeug.utils import secure_filename
 
@@ -44,7 +44,8 @@ def calendar():
 
 @public_bp.route('/book')
 def book():
-    return _page('book.html', pre_date=svc.txt(request.args.get('date'), 10), pre_hall=svc.txt(request.args.get('hall'), 100))
+    return _page('book.html', pre_date=svc.txt(request.args.get('date'), 10), pre_hall=svc.txt(request.args.get('hall'), 100),
+                 pre_start=svc.clean_time(request.args.get('start')))
 
 
 @public_bp.route('/lookup')
@@ -99,7 +100,7 @@ def hall_json(h):
     return {'nameAr': h.name_ar, 'nameEn': h.name_en or h.name_ar, 'location': h.location, 'code': h.code,
             'capacity': h.capacity, 'equipment': h.equipment, 'description': h.description, 'notes': h.notes,
             'category': h.category or 'hall', 'categoryAr': ar, 'categoryEn': en,
-            'requiresApproval': bool(h.requires_approval)}
+            'requiresApproval': bool(h.requires_approval), 'extras': svc.hall_extras(h), 'capacityNum': svc.capacity_of(h)}
 
 
 @public_bp.route('/api/halls')
@@ -171,6 +172,45 @@ def _booking_fields(data, existing=None):
     return {'start': start, 'end': end, 'hall': hall, 'full': full, 's': s_time, 'e': e_time}, None
 
 
+def _attendance_fields(data, hall):
+    """عدد الحضور والمستلزمات المطلوبة: الحضور ضمن سعة القاعة، والمستلزمات من قائمتها."""
+    raw = str(data.get('attendees') or '').strip()
+    n = None
+    if raw:
+        if not raw.isdigit() or not (0 < int(raw) <= 100000):
+            return None, 'عدد الحضور غير صالح'
+        n = int(raw)
+        cap = svc.capacity_of(hall)
+        if cap and n > cap:
+            return None, f'عدد الحضور ({n}) أكبر من سعة المكان ({cap})'
+    allowed = svc.hall_extras(hall)
+    asked = [str(x).strip() for x in (data.get('extras') or []) if str(x).strip()]
+    if any(x not in allowed for x in asked):
+        return None, 'مستلزم غير متاح لهذا المكان'
+    return {'attendees': n, 'extras': '\n'.join(dict.fromkeys(asked))}, None
+
+
+def _repeat_starts(data, f):
+    """تواريخ بدايات الحجز: تاريخ واحد، أو سلسلة بتكرار يومي أو أسبوعي أو شهري حتى تاريخ أو عدد."""
+    rep = data.get('repeat') or {}
+    freq = rep.get('freq') if isinstance(rep, dict) else 'none'
+    if freq in (None, '', 'none'):
+        return [f['start']], None
+    if freq not in svc.REPEATS:
+        return None, 'نوع التكرار غير صالح'
+    until = svc.parse_date(rep.get('until'))
+    count = rep.get('count')
+    count = int(count) if str(count or '').isdigit() else None
+    if not until and not count:
+        return None, 'حدّد تاريخ انتهاء التكرار أو عدده'
+    if until and until < f['start']:
+        return None, 'تاريخ انتهاء التكرار يجب أن يكون بعد البداية'
+    starts = svc.repeat_dates(f['start'], freq, until, count)
+    if len(starts) < 2:
+        return None, 'التكرار لا يعطي أكثر من حجز واحد؛ وسّع التاريخ أو العدد'
+    return starts, None
+
+
 def _slot_error(f, exclude_id=None):
     """رسالة تعارض أو حجب للموعد، أو None. يرجع (الرسالة، رمز الحالة)."""
     hn = f['hall'].name_ar
@@ -204,19 +244,43 @@ def submit_booking():
     f, msg = _booking_fields(data)
     if msg:
         return err_json(msg)
-    msg, code = _slot_error(f)
+    extra, msg = _attendance_fields(data, f['hall'])
     if msg:
-        return err_json(msg, code)
+        return err_json(msg)
+    starts, msg = _repeat_starts(data, f)
+    if msg:
+        return err_json(msg)
+    span = (f['end'] - f['start']).days
+    bad = []
+    for d0 in starts:
+        g = dict(f, start=d0, end=d0 + timedelta(days=span))
+        m, code = _slot_error(g)
+        if m:
+            bad.append((d0, m, code))
+    if bad:
+        if len(starts) == 1:
+            return err_json(bad[0][1], bad[0][2])
+        days = '، '.join(d.strftime('%Y-%m-%d') for d, _, _ in bad[:6])
+        resp = jsonify({'error': f'تتعارض مواعيد في {len(bad)} من {len(starts)} تاريخاً ({days}). غيّر الموعد أو التكرار.',
+                        'errorEn': f'{len(bad)} of {len(starts)} dates clash ({", ".join(d.strftime("%Y-%m-%d") for d, _, _ in bad[:6])}). Change the time or the repeat.',
+                        'conflicts': [d.strftime('%Y-%m-%d') for d, _, _ in bad]})
+        resp.status_code = 409
+        return resp
 
-    booking = Booking(
-        req_id=svc.new_req_id(), action_token=secrets.token_urlsafe(32), full_name=name, email=email,
-        phone=svc.txt(data.get('phone'), 50), behalf=svc.txt(data.get('onBehalf'), 100), title=title,
-        hall_name=f['hall'].name_ar, start_date=f['start'], end_date=f['end'], start_time=f['s'] or None,
-        end_time=f['e'] or None, full_day=f['full'], notes=svc.txt(data.get('notes'), 2000),
-        attachments=','.join(svc.valid_attachments(data.get('attUrls'))),
-        cc_emails=','.join(svc.split_emails(data.get('ccEmails'))[:10]), status='pending')
-    db.session.add(booking)
-    db.session.flush()
+    series = 'SR-' + secrets.token_hex(4).upper() if len(starts) > 1 else None
+    rows = []
+    for i, d0 in enumerate(starts):
+        rows.append(Booking(
+            req_id=svc.new_req_id(), action_token=secrets.token_urlsafe(32), full_name=name, email=email,
+            phone=svc.txt(data.get('phone'), 50), behalf=svc.txt(data.get('onBehalf'), 100), title=title,
+            hall_name=f['hall'].name_ar, start_date=d0, end_date=d0 + timedelta(days=span), start_time=f['s'] or None,
+            end_time=f['e'] or None, full_day=f['full'], notes=svc.txt(data.get('notes'), 2000),
+            attachments=','.join(svc.valid_attachments(data.get('attUrls'))),
+            cc_emails=','.join(svc.split_emails(data.get('ccEmails'))[:10]), status='pending',
+            attendees=extra['attendees'], extras=extra['extras'], series_id=series, series_no=i + 1 if series else None))
+        db.session.add(rows[-1])
+        db.session.flush()          # يضمن تفرّد رقم الطلب قبل توليد الرقم التالي
+    booking = rows[0]
     # تذكير اختياري لصاحب الحجز بوقت يحدده (بتوقيت عمّان)
     ra = svc.txt(data.get('reminderAt'), 16)
     if ra:
@@ -230,11 +294,14 @@ def submit_booking():
 
     p = svc.booking_payload(booking)
     if svc.auto_approve_on() and not f['hall'].requires_approval:
+        for extra_row in rows[1:]:                     # بريد واحد للسلسلة كلها: عن أول حجز
+            extra_row.status, extra_row.action_date, extra_row.approved_by = 'approved', datetime.utcnow(), 'اعتماد تلقائي'
         svc.apply_status(booking, 'approved', by='اعتماد تلقائي')
     else:
         svc.notify(mail.send_confirm_email, p, bcc_list=None)
         svc.notify_staff_new(booking)
-    return jsonify({'success': True, 'reqId': booking.req_id, 'status': booking.status})
+    return jsonify({'success': True, 'reqId': booking.req_id, 'status': booking.status, 'count': len(rows),
+                    'ticket': f'/ticket/{booking.req_id}?t={booking.action_token}'})
 
 
 def _own_booking(data):
@@ -257,7 +324,9 @@ def lookup_booking():
         'reqId': b.req_id, 'name': b.full_name, 'email': b.email, 'phone': b.phone, 'behalf': b.behalf, 'title': b.title,
         'hall': b.hall_name, 'date': b.start_date.strftime('%Y-%m-%d'), 'endDate': (b.end_date or b.start_date).strftime('%Y-%m-%d'),
         'startTime': b.start_time or '', 'endTime': b.end_time or '', 'fullDay': b.full_day, 'notes': b.notes,
-        'status': b.status, 'ccEmails': b.cc_emails or '', 'rejectReason': b.reject_reason or ''})
+        'status': b.status, 'ccEmails': b.cc_emails or '', 'rejectReason': b.reject_reason or '',
+        'attendees': b.attendees or '', 'extras': [x for x in (b.extras or '').splitlines() if x],
+        'seriesCount': svc.series_count(b), 'ticket': f'/ticket/{b.req_id}?t={b.action_token}' if b.action_token else ''})
 
 
 @public_bp.route('/api/amend_booking_user', methods=['POST'])
@@ -298,8 +367,38 @@ def cancel_booking_user():
         return bad
     if b.status == 'cancelled':
         return err_json('هذا الحجز ملغي بالفعل')
+    count = 1
+    if (request.get_json(silent=True) or {}).get('series') and b.series_id:
+        # إلغاء كل الحجوزات القادمة في السلسلة (غير الملغاة) مع بريد واحد
+        rest = Booking.query.filter(Booking.series_id == b.series_id, Booking.id != b.id, Booking.status != 'cancelled',
+                                    Booking.status != 'rejected', Booking.start_date >= date_cls.today()).all()
+        for o in rest:
+            o.status, o.action_date, o.cancel_reason = 'cancelled', datetime.utcnow(), 'ألغاه صاحب الحجز (السلسلة)'
+        count += len(rest)
     svc.apply_status(b, 'cancelled', reason='ألغاه صاحب الحجز')
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'count': count})
+
+
+def _range_payload(month_start, month_end):
+    """حجوزات النطاق (غير المرفوضة وغير الملغاة) والفترات غير المتاحة، لروزنامة الشهر وجدول القاعة."""
+    bookings = Booking.query.filter(Booking.start_date <= month_end, Booking.end_date >= month_start,
+                                    ~Booking.status.in_(['rejected', 'cancelled'])).all()
+    cats = {h.name_ar: h.category or 'hall' for h in Hall.query.all()}
+    # سرّية الحجوزات: الروزنامة العامة لا تعرض رقم الحجز ولا اسم صاحبه ولا من حجز نيابة عنه،
+    # ولا عنوان المناسبة ما لم يفعّل المدير «إظهار عناوين الحجوزات للعموم».
+    show_title = AppSetting.get_bool('public_show_details', False)
+    bk = [{'title': b.title if show_title else '', 'hall': b.hall_name, 'category': cats.get(b.hall_name, 'hall'),
+           'date': b.start_date.strftime('%Y-%m-%d'), 'endDate': (b.end_date or b.start_date).strftime('%Y-%m-%d'),
+           'startTime': b.start_time or '', 'endTime': b.end_time or '', 'fullDay': b.full_day, 'status': b.status}
+          for b in bookings]
+    blocked = {}
+    for bp in BlockedPeriod.query.filter(BlockedPeriod.start_date <= month_end, BlockedPeriod.end_date >= month_start).all():
+        cur, last = max(bp.start_date, month_start), min(bp.end_date, month_end)
+        while cur <= last:
+            blocked.setdefault(cur.strftime('%Y-%m-%d'), []).append(
+                {'reason': bp.reason, 'fromTime': bp.start_time or '', 'toTime': bp.end_time or '', 'hall': bp.hall_name or ''})
+            cur += timedelta(days=1)
+    return {'bookings': bk, 'blocked': blocked}
 
 
 @public_bp.route('/api/month_data')
@@ -308,23 +407,59 @@ def get_month_data():
     m = request.args.get('month', datetime.now().month, type=int)
     if not (2000 <= y <= 2100 and 1 <= m <= 12):
         return err_json('شهر غير صالح')
-    month_start = date_cls(y, m, 1)
-    month_end = date_cls(y, m, _cal.monthrange(y, m)[1])
-    bookings = Booking.query.filter(Booking.start_date <= month_end, Booking.end_date >= month_start,
-                                    ~Booking.status.in_(['rejected', 'cancelled'])).all()
-    cats = {h.name_ar: h.category or 'hall' for h in Hall.query.all()}
-    bk = [{'reqId': b.req_id, 'title': b.title, 'hall': b.hall_name, 'category': cats.get(b.hall_name, 'hall'),
-           'date': b.start_date.strftime('%Y-%m-%d'), 'endDate': (b.end_date or b.start_date).strftime('%Y-%m-%d'),
-           'startTime': b.start_time or '', 'endTime': b.end_time or '', 'fullDay': b.full_day, 'status': b.status,
-           'behalf': b.behalf or '', 'name': b.full_name or ''} for b in bookings]
-    blocked = {}
-    for bp in BlockedPeriod.query.filter(BlockedPeriod.start_date <= month_end, BlockedPeriod.end_date >= month_start).all():
-        cur, last = max(bp.start_date, month_start), min(bp.end_date, month_end)
-        while cur <= last:
-            blocked.setdefault(cur.strftime('%Y-%m-%d'), []).append(
-                {'reason': bp.reason, 'fromTime': bp.start_time or '', 'toTime': bp.end_time or '', 'hall': bp.hall_name or ''})
-            cur += timedelta(days=1)
-    return jsonify({'bookings': bk, 'blocked': blocked})
+    return jsonify(_range_payload(date_cls(y, m, 1), date_cls(y, m, _cal.monthrange(y, m)[1])))
+
+
+@public_bp.route('/api/range_data')
+def get_range_data():
+    a, b = svc.parse_date(request.args.get('from')), svc.parse_date(request.args.get('to'))
+    if not a or not b or b < a or (b - a).days > 62:
+        return err_json('تاريخ غير صالح')
+    return jsonify(_range_payload(a, b))
+
+
+# ───────────── التأكيد الرسمي (للطباعة أو الحفظ PDF) وملف التقويم ─────────────
+def _ticket_booking(req_id):
+    b = Booking.query.filter_by(req_id=svc.txt(req_id, 50)).first()
+    token = request.args.get('t', '')
+    if not b or not b.action_token or not hmac.compare_digest(token, b.action_token):
+        abort(404)
+    return b
+
+
+@public_bp.route('/ticket/<req_id>')
+def ticket(req_id):
+    b = _ticket_booking(req_id)
+    hall = Hall.query.filter_by(name_ar=b.hall_name).first()
+    return render_template('ticket.html', lang=_lang(), b=b, hall=hall, series=svc.series_count(b),
+                           url=f'/ticket/{b.req_id}?t={b.action_token}')
+
+
+def _ics_escape(s):
+    return str(s or '').replace('\\', '\\\\').replace(';', '\\;').replace(',', '\\,').replace('\r', '').replace('\n', '\\n')
+
+
+@public_bp.route('/ticket/<req_id>.ics')
+def ticket_ics(req_id):
+    b = _ticket_booking(req_id)
+    end = b.end_date or b.start_date
+    lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//ACS//Hall Booking//AR', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT',
+             f'UID:{b.req_id}@acs', f'DTSTAMP:{datetime.utcnow():%Y%m%dT%H%M%SZ}']
+    if b.full_day or not b.start_time:
+        lines += [f'DTSTART;VALUE=DATE:{b.start_date:%Y%m%d}', f'DTEND;VALUE=DATE:{end + timedelta(days=1):%Y%m%d}']
+    else:
+        st, en = b.start_time.replace(':', ''), (b.end_time or b.start_time).replace(':', '')
+        lines += [f'DTSTART;TZID=Asia/Amman:{b.start_date:%Y%m%d}T{st}00', f'DTEND;TZID=Asia/Amman:{end:%Y%m%d}T{en}00']
+    lines += [f'SUMMARY:{_ics_escape(b.title)}', f'LOCATION:{_ics_escape(b.hall_name)}',
+              f'DESCRIPTION:{_ics_escape("رقم الحجز " + b.req_id)}',
+              'STATUS:' + ('CONFIRMED' if b.status == 'approved' else 'TENTATIVE'), 'END:VEVENT', 'END:VCALENDAR']
+    return Response('\r\n'.join(lines) + '\r\n', mimetype='text/calendar',
+                    headers={'Content-Disposition': f'attachment; filename="{b.req_id}.ics"'})
+
+
+@public_bp.route('/schedule')
+def schedule():
+    return _page('schedule.html', pre_date=svc.txt(request.args.get('date'), 10), pre_hall=svc.txt(request.args.get('hall'), 100))
 
 
 # ───────────── الموافقة والرفض من البريد ─────────────

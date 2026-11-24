@@ -272,6 +272,7 @@
       </div>
       <div class="card" data-perm="settings.approval">
         <div class="card-title"><i class="fas fa-circle-check"></i> {{ 'الاعتماد التلقائي' if ar else 'Automatic approval' }}</div>
+        <label class="check-line"><input type="checkbox" id="sPublicDetails"> <span>{{ 'إظهار عناوين المناسبات للعموم في الروزنامة والجدول (الافتراضي: مخفية، فيظهر «محجوز» فقط، ولا يظهر اسم صاحب الحجز أبداً)' if ar else 'Show event titles to the public in the calendar and schedule (default: hidden, so only “Booked” shows, and the applicant name is never shown)' }}</span></label>
         <label class="check-line"><input type="checkbox" id="sAutoApprove"> <span>{{ 'اعتماد كل حجز جديد فور تقديمه (ما عدا المباني والمرافق التي تتطلب موافقة مسبقة). تصل الإشعارات كالمعتاد.' if ar else 'Approve every new booking as soon as it is submitted (except buildings and facilities that need prior approval). Notices are sent as usual.' }}</span></label>
       </div>
       <div class="card" data-perm="settings.reminders">
@@ -318,6 +319,7 @@
     <div class="form-group"><label for="hLocation">{{ 'الموقع' if ar else 'Location' }}</label><input type="text" id="hLocation"></div>
     <div class="form-group"><label for="hCapacity">{{ 'السعة (عدد الأشخاص)' if ar else 'Capacity (people)' }}</label><input type="number" id="hCapacity" min="0" dir="ltr"></div>
   </div>
+  <div class="form-group"><label for="hExtras">{{ 'المستلزمات التي يمكن طلبها (سطر لكل مستلزم)' if ar else 'Items that can be requested (one per line)' }}</label><textarea id="hExtras" rows="3" placeholder="{{ 'كراسٍ إضافية&#10;ميكروفون&#10;ضيافة' if ar else 'Extra chairs&#10;Microphone&#10;Catering' }}"></textarea></div>
   <div class="form-group"><label for="hEquip">{{ 'المعدات والمرافق' if ar else 'Equipment and amenities' }}</label><textarea id="hEquip" rows="2"></textarea></div>
   <div class="form-group"><label for="hDesc">{{ 'الوصف' if ar else 'Description' }}</label><textarea id="hDesc" rows="2"></textarea></div>
   <div class="form-group"><label for="hNotes">{{ 'ملاحظات للمستخدم' if ar else 'Notes for the user' }}</label><textarea id="hNotes" rows="2"></textarea></div>

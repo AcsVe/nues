@@ -145,6 +145,8 @@ def booking_row(b):
             'rejectReason': b.reject_reason or '', 'cancelReason': b.cancel_reason or '', 'ccEmails': b.cc_emails or '',
             'approvedBy': b.approved_by or '', 'created': b.created_at.strftime('%Y-%m-%d') if b.created_at else '',
             'comments': BookingComment.query.filter_by(booking_id=b.id).count(),
+            'attendees': b.attendees or '', 'extras': [x for x in (b.extras or '').splitlines() if x],
+            'seriesId': b.series_id or '', 'seriesNo': b.series_no or 0, 'seriesCount': svc.series_count(b),
             'attachments': [a for a in (b.attachments or '').split(',') if a.startswith('/uploads/')]}
 
 
@@ -195,7 +197,11 @@ def booking_action(action, req_id):
         for o in other:
             if b.full_day or o.full_day or svc.times_overlap(b.start_time or '', b.end_time or '', o.start_time or '', o.end_time or ''):
                 return err_json(f'يتعارض مع حجز معتمد ({o.req_id})', 409)
-    svc.apply_status(b, status, reason, by=auth.current_user().name or auth.current_user().username, extra_bcc=body.get('extraBcc', ''))
+    by = auth.current_user().name or auth.current_user().username
+    if body.get('scope') == 'series' and b.series_id:
+        n, skipped = svc.apply_series(b, status, reason, by=by, extra_bcc=body.get('extraBcc', ''))
+        return jsonify({'success': True, 'count': n, 'skipped': skipped})
+    svc.apply_status(b, status, reason, by=by, extra_bcc=body.get('extraBcc', ''))
     return jsonify({'success': True})
 
 
@@ -329,7 +335,7 @@ def hall_row(h):
     ar, en = CATEGORY_NAMES.get(h.category or 'hall', CATEGORY_NAMES['hall'])
     return {'id': h.id, 'nameAr': h.name_ar, 'nameEn': h.name_en, 'location': h.location, 'code': h.code,
             'capacity': h.capacity, 'equipment': h.equipment, 'description': h.description, 'notes': h.notes,
-            'requiresApproval': h.requires_approval, 'active': h.active, 'category': h.category or 'hall',
+            'requiresApproval': h.requires_approval, 'active': h.active, 'category': h.category or 'hall', 'extras': h.extras or '',
             'categoryAr': ar, 'categoryEn': en, 'bookings': Booking.query.filter_by(hall_name=h.name_ar).count()}
 
 
@@ -337,6 +343,7 @@ def _hall_fields(h, d):
     h.name_ar, h.name_en = txt(d.get('nameAr'), 100), txt(d.get('nameEn'), 100)
     h.location, h.code, h.capacity = txt(d.get('location'), 200), txt(d.get('code'), 50), txt(d.get('capacity'), 50)
     h.equipment, h.description, h.notes = txt(d.get('equipment'), 1000), txt(d.get('description'), 2000), txt(d.get('notes'), 1000)
+    h.extras = '\n'.join(dict.fromkeys(x.strip()[:80] for x in str(d.get('extras') or '').splitlines() if x.strip()))[:2000]
     h.requires_approval, h.active = bool(d.get('requiresApproval', False)), bool(d.get('active', True))
     cat = txt(d.get('category'), 20)
     h.category = cat if cat in CATEGORIES else 'hall'
@@ -731,6 +738,7 @@ def change_password():
 # ───────────── الإعدادات ─────────────
 BOOL_SETTINGS = {   # المفتاح في الواجهة ← (المفتاح المخزَّن، الافتراضي، الصلاحية)
     'autoApproveBookings': ('auto_approve_bookings', False, 'settings.approval'),
+    'publicShowDetails': ('public_show_details', False, 'settings.approval'),
     'remindersEnabled': ('reminders_enabled', True, 'settings.reminders'),
     'reminderScheduledEnabled': ('reminder_scheduled_enabled', True, 'settings.reminders'),
     'staffDailySummaryEnabled': ('staff_daily_summary_enabled', False, 'settings.reminders'),
@@ -842,7 +850,7 @@ def set_ticker():
 
 
 # ───────────── الروابط المختصرة ─────────────
-RESERVED_SLUGS = {'calendar', 'book', 'lookup', 'admin', 'api', 'static', 'uploads', 'action', 'healthz', 'sw.js', 'robots.txt', 'favicon.ico'}
+RESERVED_SLUGS = {'calendar', 'book', 'lookup', 'admin', 'api', 'static', 'uploads', 'action', 'ticket', 'schedule', 'healthz', 'sw.js', 'robots.txt', 'favicon.ico'}
 
 
 def _base_url():

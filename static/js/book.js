@@ -11,6 +11,7 @@
   function today() { return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Amman' }).format(new Date()); }
 
   $('fDate').min = today();
+  if (window.PRE_START) $('fStart').value = window.PRE_START;
   $('fEndDate').min = today();
 
   function alertBox(msg, type) {
@@ -28,6 +29,7 @@
         (h.capacity ? ' · ' + L('السعة ', 'Capacity ') + esc(h.capacity) : '') + '</small></span></button>';
     }).join('') || '<p class="muted">' + L('لا توجد مبانٍ أو مرافق متاحة.', 'No buildings or facilities are available.') + '</p>';
     showInfo();
+    showNeeds();
   }
   function showInfo() {
     var h = halls.filter(function (x) { return x.nameAr === chosen; })[0], box = $('hallInfo');
@@ -38,6 +40,24 @@
       rows.map(function (r) { return '<div class="row"><b>' + r[0] + '</b><span><bdi>' + esc(r[1]) + '</bdi></span></div>'; }).join('');
     box.classList.add('show');
   }
+  // الحضور والمستلزمات: تظهر بعد اختيار المكان، والمستلزمات من قائمته
+  function showNeeds() {
+    var h = halls.filter(function (x) { return x.nameAr === chosen; })[0];
+    $('needsCard').hidden = !h;
+    if (!h) return;
+    $('capHint').textContent = h.capacityNum ? L('السعة القصوى ', 'Maximum capacity ') + h.capacityNum : '';
+    $('fAttendees').max = h.capacityNum || 100000;
+    $('extrasBox').hidden = !(h.extras && h.extras.length);
+    $('extrasList').innerHTML = (h.extras || []).map(function (x, i) {
+      return '<label class="check-line"><input type="checkbox" class="ex" value="' + esc(x) + '"> <span><bdi>' + esc(x) + '</bdi></span></label>';
+    }).join('');
+  }
+  function repeatInfo() {
+    var f = $('fRepeat').value; $('repeatRow').hidden = f === 'none';
+    $('repeatHint').hidden = f === 'none';
+    $('repeatHint').textContent = f === 'none' ? '' : L('يُنشأ حجز لكل تاريخ ضمن السلسلة، ويُرفض الطلب كله إذا تعارض أي تاريخ (حتى 52 حجزاً).', 'A booking is created for every date in the series, and the whole request is refused if any date clashes (up to 52 bookings).');
+  }
+  $('fRepeat').addEventListener('change', repeatInfo);
 
   fetch('/api/halls').then(function (r) { return r.json(); }).then(function (h) {
     halls = h;
@@ -82,6 +102,8 @@
     if (end < date) return alertBox(L('تاريخ الانتهاء يجب أن يكون بعد البداية.', 'The end date must be after the start date.'));
     if (!full && !s) return alertBox(L('حدّد وقت البداية.', 'Set the start time.'));
     if (!full && en && en <= s) return alertBox(L('وقت النهاية يجب أن يكون بعد وقت البداية.', 'The end time must be after the start time.'));
+    var rep = $('fRepeat').value;
+    if (rep !== 'none' && !$('fRepUntil').value && !$('fRepCount').value) return alertBox(L('حدّد تاريخ انتهاء التكرار أو عدد المرات.', 'Set the repeat end date or the number of times.'));
     if (!title) return alertBox(L('اكتب عنوان المناسبة.', 'Write the event title.'));
     if (!name) return alertBox(L('اكتب الاسم الكامل.', 'Write your full name.'));
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return alertBox(L('اكتب بريداً إلكترونياً صحيحاً.', 'Write a valid email address.'));
@@ -90,10 +112,14 @@
     fetch('/api/submit_booking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
       fullName: name, email: email, phone: $('fPhone').value.trim(), onBehalf: $('fBehalf').value.trim(), eventTitle: title, hall: chosen,
       bookingDate: date, endDate: end, startTime: s, endTime: en, fullDay: full, notes: $('fNotes').value.trim(), ccEmails: $('fCC').value.trim(),
+      attendees: $('fAttendees').value, extras: [].map.call(document.querySelectorAll('.ex:checked'), function (c) { return c.value; }),
+      repeat: rep === 'none' ? null : { freq: rep, until: $('fRepUntil').value, count: $('fRepCount').value },
       reminderAt: $('fRemind').value, attUrls: attachments.map(function (a) { return a.url; }) }) })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error((AR ? j.error : (j.errorEn || j.error)) || ''); return j; }); })
       .then(function (j) {
         $('bookForm').hidden = true; $('done').hidden = false; $('reqId').textContent = j.reqId;
+        if (j.ticket) { $('doneTicket').href = j.ticket + '&lang=' + (AR ? 'ar' : 'en'); $('doneTicket').hidden = false; }
+        if (j.count > 1) { var n = document.createElement('p'); n.className = 'muted'; n.textContent = L('أُنشئ ' + j.count + ' حجزاً في السلسلة. الرقم أعلاه لأولها.', j.count + ' bookings were created in the series. The number above is the first.'); $('reqId').after(n); }
         $('doneTitle').textContent = j.status === 'approved' ? L('تمّت الموافقة على حجزك', 'Your booking is approved') : L('تم استلام طلبك بنجاح', 'Your request was received');
         window.scrollTo({ top: 0, behavior: 'smooth' });
       })
