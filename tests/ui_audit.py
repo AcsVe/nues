@@ -1,0 +1,230 @@
+"""فحص مظهر نظام الحجز (لوحة التحكم والصفحات العامة) في متصفح حقيقي: كل تبويب، بالعربية والإنجليزية، على الحاسوب والهاتف.
+
+يفحص: أخطاء JavaScript، والتباين، والخط الأصغر من 13px، والخروج الأفقي عن الشاشة، واتجاه النص
+(نص يبدأ بلغة ومعه أرقام أو علامات داخل عنصر باتجاه اللغة الأخرى فيظهر مقلوباً)، والنصوص غير المترجمة
+(أي حرف عربي في الواجهة الإنجليزية حين تكون البيانات كلها إنجليزية).
+
+ثلاث جولات: واجهة عربية ببيانات عربية، وواجهة إنجليزية ببيانات عربية (للاتجاه)، وواجهة إنجليزية ببيانات
+إنجليزية (للترجمة). البيانات مصطنعة في مجلد بيانات مؤقت (tests/audit_server.py) ولا يُمسّ شيء حقيقي.
+
+التشغيل:  python tests/ui_audit.py        (E2E_CHANNEL=chrome|msedge|chromium، E2E_OUT=مجلد الصور)
+النتيجة يجب أن تكون 0 ملاحظات.
+"""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+from playwright.sync_api import sync_playwright
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.environ.get('E2E_OUT') or tempfile.mkdtemp(prefix='acs-ui-')
+os.makedirs(OUT, exist_ok=True)
+
+TABS = re.findall(r"switchTab\('([a-z-]+)'", open(os.path.join(ROOT, 'templates', 'admin.html'), encoding='utf-8').read())
+TABS = list(dict.fromkeys(TABS))
+# عناصر تبقى بالعربية عمداً في الواجهة الإنجليزية: زر تبديل اللغة، واسم المستخدم «مدير النظام» المحفوظ في القاعدة
+# «العربية» زر تبديل اللغة، و«مدير النظام» الاسم الكامل لأول مدير (بيانات محفوظة لا نص واجهة)
+UNTRANSLATED_OK = ['عربي', 'مدير النظام']
+
+AUDIT_JS = r"""(args) => {
+  const [scopeSel, checkArabic, okList] = args;
+  const scope = document.querySelector(scopeSel) || document.body;
+  const lum = (c) => { const m = c.match(/[\d.]+/g); if (!m) return null; const [r, g, b] = m.slice(0, 3).map((v) => { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+    return { l: 0.2126 * r + 0.7152 * g + 0.0722 * b, a: m.length > 3 ? Number(m[3]) : 1 }; };
+  const bgOf = (el) => { while (el) { const s = getComputedStyle(el); const L = lum(s.backgroundColor);
+      if (s.backgroundImage !== 'none') return null; if (L && L.a > 0.9) return L.l; el = el.parentElement; } return 1; };
+  const AR = /[؀-ۿ]/, LA = /[A-Za-z]/, NEUTRAL = /[0-9٠-٩.:*?؟()\-–—%/]/;
+  const firstStrong = (t) => { for (const ch of t) { if (AR.test(ch)) return 'rtl'; if (LA.test(ch)) return 'ltr'; } return null; };
+  const isolated = (n) => n.nodeType === 1 && (n.tagName === 'BDI' || n.hasAttribute('dir') || getComputedStyle(n).unicodeBidi === 'plaintext');
+  // النص بين علامتي العزل (U+2068…U+2069) يأخذ اتجاهه بنفسه
+  const textOf = (n) => n.nodeType === 3 ? n.textContent.replace(/\u2068[^\u2069]*\u2069/g, ' ') : (isolated(n) ? ' ' : [...n.childNodes].map(textOf).join(''));
+  const out = { contrast: [], small: [], bidi: [], untranslated: [] };
+  const seen = new Set();
+  const add = (k, list, msg) => { if (!seen.has(k)) { seen.add(k); out[list].push(msg.slice(0, 150)); } };
+  [document.querySelector('.topbar, header'), scope].filter(Boolean).forEach((root) => root.querySelectorAll('*').forEach((el) => {
+    if (!el.offsetParent && getComputedStyle(el).position !== 'fixed') return;
+    const own = [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim().length > 1);
+    if (!own) return;
+    const s = getComputedStyle(el); if (s.visibility === 'hidden') return;
+    // الشفافية الفعلية = حاصل ضرب شفافية العنصر وكل آبائه (المكتبات تُبهت الأب لا النص نفسه)
+    let op = 1; for (let n = el; n; n = n.parentElement) op *= Number(getComputedStyle(n).opacity);
+    if (op < 0.15) return;
+    if (el.closest('canvas,svg,option,select,script,style,.leaflet-container')) return;
+    const fs = parseFloat(s.fontSize), fw = Number(s.fontWeight) || 400;
+    const txt = el.textContent.replace(/\s+/g, ' ').trim().slice(0, 50);
+    let fg = lum(s.color); const bg = bgOf(el);
+    if (fg && bg !== null && op < 1) fg = { l: fg.l * op + bg * (1 - op), a: fg.a };   // تقريب: مزج الإضاءة مع الخلفية
+    const fieldOff = el.tagName === 'LABEL' && el.closest('.form-group') && el.closest('.form-group').querySelector('input:disabled,select:disabled,textarea:disabled');   // تسمية حقل معطّل مستثناة كالحقل نفسه
+    if (fg && bg !== null && !fieldOff && !el.closest(':disabled,[disabled]')) {
+      const ratio = (Math.max(fg.l, bg) + 0.05) / (Math.min(fg.l, bg) + 0.05);
+      const large = fs >= 24 || (fs >= 18.6 && fw >= 700);
+      if (ratio < (large ? 3 : 4.5)) add('c' + txt, 'contrast', `${ratio.toFixed(2)} «${txt}» ${el.tagName}.${el.className}`);
+    }
+    // تاريخ ووقت بلا حروف (2026-11-06 18:05) داخل عنصر من اليمين لليسار: يظهر الوقت قبل التاريخ
+    const own2 = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').trim();
+    if (s.direction === 'rtl' && /^\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}/.test(own2) && s.unicodeBidi !== 'plaintext')
+      add('t' + own2, 'bidi', `rtl «${own2.slice(0, 40)}» ${el.tagName}.${el.className}`);
+    if (fs < 13) add('s' + txt, 'small', `${fs}px «${txt}» ${el.tagName}.${el.className}`);
+    const full = s.unicodeBidi === 'plaintext' ? '' : [...el.childNodes].map(textOf).join('').replace(/\s+/g, ' ').trim();
+    const want = firstStrong(full);
+    if (want && want !== s.direction && NEUTRAL.test(full) && (AR.test(full) && LA.test(full) || want === 'rtl' ? true : /^[^A-Za-z]|[^A-Za-z0-9]$/.test(full))
+        && !el.closest('code,pre,kbd,input,textarea')) add('d' + full, 'bidi', `${s.direction} «${full.slice(0, 60)}» ${el.tagName}.${el.className}`);
+    if (checkArabic && !el.closest('[data-content]')) {   // data-content: محتوى يكتبه المستخدم (اسم بلغتين مثلاً)
+      const ownTxt = [...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join(' ').replace(/\s+/g, ' ').trim();
+      if (AR.test(ownTxt) && !okList.some((w) => ownTxt === w)) add('u' + ownTxt, 'untranslated', `«${ownTxt.slice(0, 70)}» ${el.tagName}.${el.className}`);
+    }
+  }));
+  // عناصر تفيض عن بطاقتها
+  out.overflow = document.documentElement.scrollWidth - innerWidth;
+  return out;
+}"""
+
+
+def start_server(data, lang, port):
+    proc = subprocess.Popen([sys.executable, os.path.join(ROOT, 'tests', 'audit_server.py'), data, lang, str(port)],
+                            cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(120):
+        try:
+            urllib.request.urlopen(f'http://127.0.0.1:{port}/healthz', timeout=1)
+            return proc
+        except Exception:
+            time.sleep(0.5)
+    proc.terminate()
+    raise SystemExit('the test server did not start')
+
+
+PORTS = {'ar': 5291, 'en': 5292}
+servers = {k: start_server(os.path.join(OUT, f'data-{k}'), k, p) for k, p in PORTS.items()}
+PUBLIC = ['/', '/book']
+# فحص لغة الواجهة: النصوص الظاهرة ونصوص الإرشاد (placeholder وtitle وalt وaria-label) — يُنسخ إلى tests/ui_audit.py في كل نظام.
+# يرصد: نصاً يشبه الكود (أسماء متغيرات وملفات وقيم برمجية)، وكلمات عامية أو دخيلة في الواجهة العربية، ونص إرشاد بالإنجليزية
+# في الواجهة العربية أو بالعربية في الإنجليزية، وصورة بلا نص بديل.
+LANG_JS = r"""(args) => {
+  const [ui, okWords, checkArabic, scopeSel] = args;   // checkArabic: الواجهة الإنجليزية ببيانات إنجليزية
+  const out = []; const seen = new Set();
+  const add = (k, m) => { if (!seen.has(k)) { seen.add(k); out.push(m.slice(0, 150)); } };
+  const AR = /[؀-ۿ]/;
+  const ok = new Set(['iOS', 'iPhone', 'iPad', 'macOS', 'iCloud', 'eSchool', 'YouTube', 'WhatsApp', 'PayPal', 'OneDrive',
+                      'SharePoint', 'PowerPoint', 'GitHub', 'MenaPAY', 'MenaITech', 'ZKTeco', 'BellPlayer', 'JavaScript', 'aSc'].concat(okWords || []));
+  // يُحذف البريد والروابط والنطاقات قبل الفحص: ليست كوداً
+  const clean = (t) => t.replace(/\S+@\S+|https?:\/\/\S*|\b[\w.-]+\.(org|com|net|edu|jo|test|gov)\b\S*/gi, ' ');
+  const CODE = [
+    [/\b[a-z][a-z0-9]*_[a-z0-9_]+\b/, 'snake_case'],
+    [/\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/, 'variable name'],
+    [/\b[a-z]+[A-Z][A-Za-z]+\b/, 'camelCase'],
+    [/\{\{|\}\}|\{%|%\}|\$\{|<\/?[a-z]+>/, 'template code'],
+    [/^(undefined|null|NaN)$|\b(undefined|NaN|Traceback|TypeError|KeyError|ValueError)\b|\[object /, 'program value'],
+    [/\b[\w-]+\.(py|bat|env|db|sqlite|json|js|css|html|ps1|sql|log|ini|cfg)\b/i, 'file name'],
+    [/\b(HTTP|Error|errno|status)\s*\d{3}\b|\bSQLITE_|\bOperationalError\b/i, 'error code'],
+  ];
+  // None/True/False كلمات إنجليزية سليمة في الواجهة الإنجليزية؛ وفي العربية تعني قيمة برمجية تسرّبت
+  if (ui === 'ar') CODE.push([/^(None|True|False)$/, 'program value']);
+  const codeLike = (t) => { t = clean(t); for (const [re, name] of CODE) { const m = t.match(re); if (m && !ok.has(m[0])) return `${name} «${m[0]}»`; } return null; };
+  // عامي أو دخيل (القاعدة: «إذا/إن» لا «لو»، «فقط» لا «بس»، «الخادم» لا «السيرفر»، «الهاتف» لا «الموبايل»...)
+  const COLLOQ = /(?:^|[\s،؛.؟!«(\/])(لو|بس|اللي|إللي|فاضي|فاضية|هيك|شو|مش|كمان|هلق|هلأ|منيح|ليش|وين|هاي|هاد|هادا|السيرفر|سيرفر|الموبايل|موبايل|تيمز|الباسورد|باسورد|يوزر|اليوزر|اللوجو|لوجو|الداتا|داتا|لينك|اللينك|فايل|الفايل|ايميل|إيميل|الإيميل|الايميل|اوكي|أوكي|نزّل|نزّلها|حمّلها|سيستم|السيستم|أبديت|ابديت)(?=$|[\s،؛.؟!»):\/])/;
+  const LATIN_WORD = /\b[A-Za-z]{3,}\b/g;
+  // حقل لغته محدّدة (lang="en" لاسم بالإنجليزية، lang="ar" لاسم بالعربية): مثاله بتلك اللغة مقصود
+  const fieldLang = (el) => { const n = el.closest('[lang]'); return n && n !== document.documentElement ? n.getAttribute('lang').slice(0, 2) : null; };
+  const check = (el, where, t) => {
+    if (!t || !t.trim()) return;
+    t = t.replace(/\s+/g, ' ').trim();
+    const tag = `${el.tagName}.${(el.className && el.className.baseVal === undefined ? el.className : '')}`.slice(0, 40);
+    const c = codeLike(t); if (c) add('c' + where + t, `code-like ${c} in ${where} «${t.slice(0, 60)}» ${tag}`);
+    if (ui === 'ar') {
+      const m = t.match(COLLOQ); if (m) add('q' + t, `colloquial «${m[1]}» in ${where} «${t.slice(0, 60)}» ${tag}`);
+      if (where !== 'text' && !AR.test(t) && fieldLang(el) !== 'en') {   // نص إرشاد كله بالإنجليزية (الرموز والأسماء بجانب العربية مقبولة)
+        const latin = (clean(t).match(LATIN_WORD) || []).filter((w) => !ok.has(w) && !/^x+$/i.test(w) && !/^(PDF|Excel|Word|CSV|QR|Microsoft|Google|Outlook|Teams|Android|Windows|Chrome|Edge|Wi|Fi|USB|SMS|API|URL|IP|PIN|OTP|ID|Cloudflare|Dahua|Render|Drive|Gmail|Zoom|Forms|Office|Apple|Huawei|Samsung)$/i.test(w));
+        if (latin.length) add('l' + where + t, `English «${latin.slice(0, 3).join(' ')}» in ${where} of the Arabic interface «${t.slice(0, 60)}» ${tag}`);
+      }
+    } else if (checkArabic && where !== 'text' && AR.test(t) && fieldLang(el) !== 'ar' && !el.closest('[data-content]') && !(okWords || []).includes(t)) {
+      add('a' + where + t, `Arabic in ${where} of the English interface «${t.slice(0, 60)}» ${tag}`);
+    }
+  };
+  const scope = (scopeSel && document.querySelector(scopeSel)) || document.body;
+  scope.querySelectorAll('*').forEach((el) => {
+    if (el.closest('script,style,code,pre,kbd,noscript,template,textarea,[data-content],[data-raw]')) return;   // textarea: نص يكتبه المستخدم أو رمز تضمين للنسخ
+    const s = getComputedStyle(el); if (s.display === 'none' && !el.closest('select')) return;
+    [...el.childNodes].forEach((n) => { if (n.nodeType === 3) check(el, 'text', n.textContent); });
+    for (const a of ['placeholder', 'title', 'alt', 'aria-label']) if (el.hasAttribute(a)) check(el, a, el.getAttribute(a));
+    if (el.matches('input[type=submit],input[type=button]')) check(el, 'button', el.value);
+    if (el.tagName === 'IMG' && !el.hasAttribute('alt')) add('i' + el.src, `image without alt text ${el.src.split('/').pop().slice(0, 50)}`);
+  });
+  check(document.documentElement, 'title', document.title);
+  return out;
+}"""
+
+
+def run(page, scope, ui, check_ar):
+    res = page.evaluate(AUDIT_JS, [scope, check_ar, UNTRANSLATED_OK])
+    res['lang'] = page.evaluate(LANG_JS, [ui, UNTRANSLATED_OK, check_ar, scope])
+    return res
+
+
+report = []
+try:
+    with sync_playwright() as p:
+        kw = {'executable_path': os.environ['PW_EXE']} if os.environ.get('PW_EXE') else {'channel': os.environ.get('E2E_CHANNEL', 'chrome')}
+        browser = p.chromium.launch(**kw)
+        for ui, data in (('ar', 'ar'), ('en', 'ar'), ('en', 'en')):
+            base = f'http://127.0.0.1:{PORTS[data]}'
+            check_ar = ui == 'en' and data == 'en'
+            for vp_name, vp in (('desktop', {'viewport': {'width': 1366, 'height': 900}}), ('phone', dict(p.devices['iPhone 13']))):
+                ctx = browser.new_context(**vp)
+                ctx.add_init_script(f"try {{ localStorage.setItem('adminLang', '{ui}'); }} catch (e) {{}}")
+                page = ctx.new_page()
+                errs = []
+                page.on('pageerror', lambda e: errs.append(str(e)))
+                page.on('console', lambda m: errs.append(m.text) if m.type == 'error' and 'favicon' not in m.text else None)
+                for u in PUBLIC:
+                    page.goto(f'{base}{u}?lang={ui}', wait_until='networkidle')
+                    page.wait_for_timeout(500)
+                    report.append((vp_name, ui, data, u, run(page, 'body', ui, check_ar), list(errs)))
+                    errs.clear()
+                page.goto(f'{base}/admin?lang={ui}', wait_until='networkidle')
+                page.fill('#loginUser', 'admin')
+                page.fill('#loginPass', 'audit-pass-123')
+                page.press('#loginPass', 'Enter')
+                page.wait_for_selector('#loginOverlay', state='hidden', timeout=10000)
+                page.wait_for_load_state('networkidle')
+                for t in TABS:
+                    page.click(f"[onclick*=\"switchTab('{t}'\"]")
+                    try:
+                        page.wait_for_load_state('networkidle', timeout=8000)
+                    except Exception:
+                        pass
+                    page.wait_for_timeout(500)
+                    report.append((vp_name, ui, data, t, run(page, f'#tc-{t}', ui, check_ar), list(errs)))
+                    errs.clear()
+                    if os.environ.get('SHOTS'):
+                        page.screenshot(path=os.path.join(OUT, f'{vp_name}-{ui}{data}-{t}.jpg'), type='jpeg', quality=45)
+                ctx.close()
+        browser.close()
+finally:
+    for s in servers.values():
+        s.terminate()
+
+import json  # noqa: E402
+with open(os.path.join(OUT, 'report.json'), 'w', encoding='utf-8') as fh:
+    json.dump(report, fh, ensure_ascii=False)
+
+bad = 0
+for vp_name, ui, data, t, res, errs in report:
+    issues = []
+    if res['overflow'] > 2:
+        issues.append(f"horizontal overflow {res['overflow']}px")
+    issues += ['contrast ' + x for x in res['contrast']] + ['small ' + x for x in res['small']]
+    issues += ['direction ' + x for x in res['bidi']] + ['untranslated ' + x for x in res['untranslated']] + ['language ' + x for x in res.get('lang', [])]
+    issues += ['JS ' + e for e in errs]
+    if issues:
+        bad += len(issues)
+        print(f'[{vp_name} ui={ui} data={data}] {t}')
+        for i in issues[:15]:
+            print('   ', i)
+        if len(issues) > 15:
+            print(f'    … {len(issues) - 15} more')
+print(f'\n{len(report)} page views, {bad} issue(s). Output: {OUT}')
+sys.exit(1 if bad else 0)

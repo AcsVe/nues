@@ -8,29 +8,30 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/admin.css">
+{% include "_head.html" %}
 </head>
 <body>
 
 <!-- ───── Login Overlay (1:1 from GAS adminBody) ───── -->
-<div id="loginOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg,#247680,#1a5c64);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
+<div id="loginOverlay" style="position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg,var(--accent),var(--accent-dark));z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px">
   <div style="background:#fff;border-radius:16px;padding:40px 32px;max-width:400px;width:100%;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,.3)">
-    <img src="{{ logo }}" style="height:60px;margin-bottom:16px">
-    <h2 style="color:#1a5c64;font-size:20px;font-weight:800;margin-bottom:6px;font-family:Tajawal,sans-serif">{{ 'لوحة التحكم' if ar else 'Admin Panel' }}</h2>
-    <p style="color:#80868b;font-size:13px;margin-bottom:20px;font-family:Tajawal,sans-serif">{{ 'الرجاء تسجيل الدخول' if ar else 'Please log in' }}</p>
+    <img src="{{ logo }}" alt="{{ 'شعار المؤسسة' if lang == 'ar' else 'Organization logo' }}" style="height:60px;margin-bottom:16px">
+    <h2 style="color:var(--accent-dark);font-size:20px;font-weight:800;margin-bottom:6px;font-family:Tajawal,sans-serif">{{ 'لوحة التحكم' if ar else 'Admin Panel' }}</h2>
+    <p style="color:#5f6368;font-size:13px;margin-bottom:20px;font-family:Tajawal,sans-serif">{{ 'الرجاء تسجيل الدخول' if ar else 'Please log in' }}</p>
     <form onsubmit="doLogin();return false;">
       <input type="text" id="loginUser" placeholder="{{ 'اسم المستخدم' if ar else 'Username' }}" style="width:100%;padding:12px 16px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;font-family:inherit;margin-bottom:12px;direction:ltr;text-align:center">
       <input type="password" id="loginPass" placeholder="{{ 'كلمة المرور' if ar else 'Password' }}" style="width:100%;padding:12px 16px;border:2px solid #e0e0e0;border-radius:10px;font-size:14px;font-family:inherit;margin-bottom:16px;direction:ltr;text-align:center">
-      <button type="submit" style="width:100%;padding:14px;background:linear-gradient(135deg,#247680,#1a5c64);color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;transition:.2s">{{ 'دخول' if ar else 'Login' }}</button>
+      <button type="submit" style="width:100%;padding:14px;background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:800;cursor:pointer;font-family:inherit;transition:.2s">{{ 'دخول' if ar else 'Login' }}</button>
     </form>
-    <div id="loginErr" style="color:#e74c3c;font-size:13px;margin-top:10px;display:none;font-family:Tajawal,sans-serif"></div>
-    <a target="_top" href="/?lang={{ lang }}" style="display:inline-flex;align-items:center;gap:6px;margin-top:18px;color:#247680;text-decoration:none;font-size:14px;font-weight:700;font-family:Tajawal,sans-serif;transition:.2s"><i class="fas fa-calendar-alt"></i> {{ 'العودة للروزنامة' if ar else 'Back to Calendar' }}</a>
+    <div id="loginErr" style="color:#c0392b;font-size:13px;margin-top:10px;display:none;font-family:Tajawal,sans-serif"></div>
+    <a target="_top" href="/?lang={{ lang }}" style="display:inline-flex;align-items:center;gap:6px;margin-top:18px;color:var(--accent);text-decoration:none;font-size:14px;font-weight:700;font-family:Tajawal,sans-serif;transition:.2s"><i class="fas fa-calendar-alt"></i> {{ 'العودة للروزنامة' if ar else 'Back to Calendar' }}</a>
   </div>
 </div>
 
 <!-- ───── Top Bar ───── -->
 <div class="top-bar">
   <div class="logo-area">
-    <img src="{{ logo }}">
+    <img src="{{ logo }}" alt="{{ 'شعار المؤسسة' if lang == 'ar' else 'Organization logo' }}">
     <div>
       <h1 id="hdrTitle">{{ org_ar if ar else org_en }}</h1>
       <p id="hdrSub">{{ 'لوحة التحكم — نظام الحجز' if ar else 'Admin Panel — Booking System' }}</p>
@@ -64,6 +65,8 @@
     <button class="tab" onclick="switchTab('blocked',this)"><i class="fas fa-ban"></i> <span id="ttBlocked">{{ 'غير متاح' if ar else 'Unavailable' }}</span></button>
     <button class="tab" onclick="switchTab('contacts',this)"><i class="fas fa-address-book"></i> <span id="ttContacts">{{ 'جهات الإتصال' if ar else 'Contacts' }}</span></button>
     <button class="tab" onclick="switchTab('reports',this)"><i class="fas fa-chart-bar"></i> <span id="ttReports">{{ 'التقارير' if ar else 'Reports' }}</span></button>
+    <button class="tab" onclick="switchTab('users',this)"><i class="fas fa-users"></i> <span id="ttUsers">{{ 'المستخدمون' if ar else 'Users' }}</span></button>
+    <button class="tab" onclick="switchTab('settings',this)"><i class="fas fa-cog"></i> <span id="ttSettings">{{ 'الإعدادات' if ar else 'Settings' }}</span></button>
   </div>
 
   <!-- ───── Bookings Tab ───── -->
@@ -84,7 +87,7 @@
       <h3><i class="fas fa-plus-circle"></i> <span id="addHallTitle">{{ 'إضافة قاعة جديدة' if ar else 'Add New Venue' }}</span></h3>
       <div class="hf">
         <div class="fg"><label id="lblNameAr">{{ 'الاسم (عربي)' if ar else 'Name (Arabic)' }} <span class="req">*</span></label><input type="text" id="hNameAr" placeholder="{{ 'مثال: القاعة الرئيسية' if ar else 'e.g. Main Hall' }}"></div>
-        <div class="fg"><label id="lblNameEn">{{ 'الاسم (إنجليزي)' if ar else 'Name (English)' }}</label><input type="text" id="hNameEn" placeholder="e.g. Main Hall" dir="ltr"></div>
+        <div class="fg"><label id="lblNameEn">{{ 'الاسم (إنجليزي)' if ar else 'Name (English)' }}</label><input type="text" id="hNameEn" placeholder="{{ 'الاسم بالإنجليزية' if ar else 'e.g. Main Hall' }}" dir="ltr"></div>
       </div>
       <div class="hf">
         <div class="fg"><label id="lblLocation">{{ 'الموقع' if ar else 'Location' }}</label><input type="text" id="hLocation" placeholder="{{ 'المبنى / الطابق' if ar else 'Building / Floor' }}"></div>
@@ -128,7 +131,7 @@
 
   <!-- ───── Contacts Tab ───── -->
   <div class="tab-content" id="tc-contacts">
-    <div class="ct-alert"><i class="fas fa-info-circle"></i> {{ 'ملاحظة: الإيميلات المضافة هنا سيتم إبلاغها تلقائياً عند الموافقة على أي حجز.' if ar else 'Note: Emails added here will be automatically notified when any booking is approved.' }}</div>
+    <div class="ct-alert"><i class="fas fa-info-circle"></i> {{ 'ملاحظة: عناوين البريد المضافة هنا سيتم إبلاغها تلقائياً عند الموافقة على أي حجز.' if ar else 'Note: Emails added here will be automatically notified when any booking is approved.' }}</div>
     <div class="card">
       <h3><i class="fas fa-user-plus"></i> <span id="secAddContact">{{ 'إضافة جهة اتصال فردية' if ar else 'Add Individual Contact' }}</span></h3>
       <div class="ct-form-row">
@@ -139,7 +142,7 @@
     </div>
     <div class="card">
       <h3><i class="fas fa-file-upload"></i> <span id="secUploadContact">{{ 'رفع قائمة جهات اتصال' if ar else 'Upload Contacts List' }}</span></h3>
-      <div class="ct-alert" style="margin-bottom:12px"><i class="fas fa-file-csv"></i> {{ 'ملف CSV أو TXT بعمود واحد للإيميلات (سطر لكل إيميل)' if ar else 'CSV or TXT file with one email per line' }}</div>
+      <div class="ct-alert" style="margin-bottom:12px"><i class="fas fa-file-csv"></i> {{ 'ملف CSV أو TXT بعمود واحد لعناوين البريد (سطر لكل عنوان)' if ar else 'CSV or TXT file with one email per line' }}</div>
       <label class="ct-area"><i class="fas fa-cloud-upload-alt"></i><p id="ctAreaTxt">{{ 'اضغط لاختيار ملف CSV أو TXT' if ar else 'Click to select CSV or TXT file' }}</p><input type="file" id="ctFile" accept=".csv,.txt"></label>
     </div>
     <div id="contactsList"></div>
@@ -197,6 +200,51 @@
     <div class="report-card" style="margin-top:14px">
       <h4><i class="fas fa-table"></i> <span id="rptDetail">{{ 'تفصيل الحجوزات لكل قاعة حسب الشهر' if ar else 'Detailed Bookings per Venue by Month' }}</span></h4>
       <div class="tbl-wrap" id="detailTable" style="border:none"></div>
+    </div>
+  </div>
+
+
+  <!-- ───── Users Tab ───── -->
+  <div class="tab-content" id="tc-users">
+    <div class="card">
+      <h3><i class="fas fa-users"></i> {{ 'مستخدمو لوحة التحكم' if ar else 'Admin Users' }}</h3>
+      <div style="margin-bottom:12px"><button class="hbtn primary" onclick="openUser()"><i class="fas fa-user-plus"></i> {{ 'إضافة مستخدم' if ar else 'Add User' }}</button></div>
+      <div id="usersList"></div>
+    </div>
+  </div>
+
+  <!-- ───── Settings Tab ───── -->
+  <div class="tab-content" id="tc-settings">
+    <div class="card">
+      <h3><i class="fas fa-id-card"></i> {{ 'هوية المؤسسة' if ar else 'Organization Identity' }}</h3>
+      <div class="hf">
+        <div class="fg"><label for="sOrgAr">{{ 'اسم المؤسسة (عربي)' if ar else 'Organization Name (Arabic)' }}</label><input type="text" id="sOrgAr"></div>
+        <div class="fg"><label for="sOrgEn">{{ 'اسم المؤسسة (إنجليزي)' if ar else 'Organization Name (English)' }}</label><input type="text" id="sOrgEn" dir="ltr"></div>
+      </div>
+      <div class="fg"><label for="sAccent">{{ 'اللون الرئيسي' if ar else 'Main Color' }}</label><input type="color" id="sAccent" style="width:80px;height:42px;padding:2px"></div>
+      <div class="fg">
+        <label>{{ 'الشعار' if ar else 'Logo' }}</label>
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+          <img id="sLogoImg" alt="{{ 'الشعار الحالي' if ar else 'Current logo' }}" style="height:64px;max-width:160px;object-fit:contain;border:1px solid #e0e0e0;border-radius:10px;padding:6px;background:#fff;display:none">
+          <label class="hbtn sec" style="cursor:pointer"><i class="fas fa-upload"></i> {{ 'رفع شعار' if ar else 'Upload Logo' }}<input type="file" accept=".png,.jpg,.jpeg,.webp,.svg" style="display:none" onchange="uploadLogo(this)"></label>
+          <button class="hbtn danger" onclick="removeLogo()"><i class="fas fa-trash"></i> {{ 'إزالة الشعار' if ar else 'Remove Logo' }}</button>
+        </div>
+        <p class="hint">{{ 'يظهر الشعار في الصفحات والبريد. يُفضَّل شعار مربع بخلفية شفافة (PNG أو SVG).' if ar else 'The logo appears on the pages and in emails. A square logo with a transparent background (PNG or SVG) works best.' }}</p>
+      </div>
+      <button class="hbtn primary" onclick="saveSettings()"><i class="fas fa-save"></i> {{ 'حفظ' if ar else 'Save' }}</button>
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-envelope"></i> {{ 'البريد الإلكتروني' if ar else 'Email' }}</h3>
+      <p id="sMail" class="hint"></p>
+    </div>
+    <div class="card">
+      <h3><i class="fas fa-key"></i> {{ 'تغيير كلمة المرور' if ar else 'Change Password' }}</h3>
+      <div class="fg"><label for="pwCur">{{ 'كلمة المرور الحالية' if ar else 'Current Password' }}</label><input type="password" id="pwCur" dir="ltr" autocomplete="current-password"></div>
+      <div class="hf">
+        <div class="fg"><label for="pwNew">{{ 'كلمة المرور الجديدة (8 أحرف على الأقل)' if ar else 'New Password (at least 8 characters)' }}</label><input type="password" id="pwNew" dir="ltr" autocomplete="new-password"></div>
+        <div class="fg"><label for="pwRep">{{ 'أعد كتابة كلمة المرور الجديدة' if ar else 'Repeat the New Password' }}</label><input type="password" id="pwRep" dir="ltr" autocomplete="new-password"></div>
+      </div>
+      <button class="hbtn primary" onclick="changePassword()"><i class="fas fa-save"></i> {{ 'تغيير' if ar else 'Change' }}</button>
     </div>
   </div>
 
@@ -266,12 +314,35 @@
   </div>
 </div>
 
+
+<!-- ───── Edit User Overlay ───── -->
+<div class="edit-overlay" id="editUserOverlay" onclick="if(event.target===this)closeUser()">
+  <div class="edit-box">
+    <h3><i class="fas fa-user-edit"></i> <span id="uTitle">{{ 'إضافة مستخدم' if ar else 'Add User' }}</span></h3>
+    <input type="hidden" id="uId">
+    <div class="hf">
+      <div class="fg"><label for="uName">{{ 'اسم المستخدم' if ar else 'Username' }} <span class="req">*</span></label><input type="text" id="uName" dir="ltr" autocomplete="off"></div>
+      <div class="fg"><label for="uFull">{{ 'الاسم' if ar else 'Name' }}</label><input type="text" id="uFull"></div>
+    </div>
+    <div class="fg"><label for="uEmail">{{ 'البريد الإلكتروني' if ar else 'Email' }}</label><input type="email" id="uEmail" dir="ltr"></div>
+    <div class="fg"><label for="uPass">{{ 'كلمة المرور (اتركها فارغة دون تغيير)' if ar else 'Password (leave blank to keep it)' }}</label><input type="password" id="uPass" dir="ltr" autocomplete="new-password"></div>
+    <div class="tog-row"><label class="tog-item"><input type="checkbox" id="uActive" checked><span>{{ 'حساب فعال' if ar else 'Active account' }}</span></label></div>
+    <div style="display:flex;gap:8px">
+      <button class="hbtn primary" onclick="saveUser()"><i class="fas fa-save"></i> {{ 'حفظ' if ar else 'Save' }}</button>
+      <button class="hbtn sec" onclick="closeUser()"><i class="fas fa-times"></i> {{ 'إلغاء' if ar else 'Cancel' }}</button>
+    </div>
+  </div>
+</div>
+
 <script>
   window.LANG_INIT = "{{ lang }}";
   window.ORG_AR = {{ org_ar|tojson }};
   window.ORG_EN = {{ org_en|tojson }};
   window.LOGO_URL = {{ logo|tojson }};
+  window.CSRF = {{ csrf|tojson }};
 </script>
+<script src="/static/js/table.js"></script>
 <script src="/static/js/admin.js"></script>
+<script src="/static/js/update-notice.js" data-version="{{ app_version }}" defer></script>
 </body>
 </html>

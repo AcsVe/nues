@@ -1,35 +1,15 @@
-# Python
 __pycache__/
 *.py[cod]
-*.pyc
-*.egg-info/
 .venv/
 venv/
-env/
 .env
-
-# Local database
-booking.db
+data/
+logs/
+backups/
+*.db
 *.sqlite
 *.sqlite3
-
-# Uploads / user content (keep folder via .gitkeep)
-static/uploads/*
-!static/uploads/.gitkeep
-
-# Duet / sandbox
-.duet/
-
-# Porting artifacts (kept out of public repo)
-_GAS_REFERENCE.gs
-_gas/
-_GAP_LIST.md
-Calendar.rar
-pasted-text-*.txt
-pasted-text*.txt
-
-# OS / editor
+*.pem
 .DS_Store
-*.swp
 .idea/
 .vscode/

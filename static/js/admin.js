@@ -11,7 +11,7 @@
 
   // ───── helpers ─────
   function esc(t){return t?String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"):"";}
-  function fmtD(ds){if(!ds)return ds;var p=String(ds).split("-");if(p.length===3)return p[2]+"/"+p[1]+"/"+p[0];return ds;}
+  function fmtD(ds){return ds?String(ds):"";}
   function showSt(m,tp){var s=document.getElementById("status");if(!s)return;s.textContent=m;s.className=tp==="ok"?"st-ok":"st-err";s.style.display="block";if(tp)setTimeout(function(){s.style.display="none"},4000);}
   function stLbl(s){return lang==="ar"?({pending:"قيد المراجعة",approved:"معتمد",rejected:"مرفوض",cancelled:"ملغي"})[s]:({pending:"Pending",approved:"Approved",rejected:"Rejected",cancelled:"Cancelled"})[s];}
 
@@ -19,7 +19,8 @@
   function api(path,opt){
     opt = opt || {};
     opt.credentials = "same-origin";
-    if(opt.body && typeof opt.body!=="string"){
+    if(opt.method && opt.method!=="GET"){opt.headers=Object.assign({"X-CSRF-Token":window.CSRF||""},opt.headers||{});}
+    if(opt.body && typeof opt.body!=="string" && !(window.FormData && opt.body instanceof FormData)){
       opt.headers = Object.assign({"Content-Type":"application/json"},opt.headers||{});
       opt.body = JSON.stringify(opt.body);
     }
@@ -31,13 +32,60 @@
     });
   }
 
-  // ───── clock ─────
-  function updateClock(){
-    var n=new Date();
-    var ds=n.toLocaleDateString(lang==="ar"?"ar-SA":"en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"});
-    var ts=n.toLocaleTimeString(lang==="ar"?"ar-SA":"en-US",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
-    var el=document.getElementById("clockEl");if(el)el.textContent=ds+" | "+ts;
+
+  function T(ar,en){return lang==="ar"?ar:en;}
+  function isoVal(d){return ' data-value="'+esc(d)+'"';}
+
+  // ───── جداول موحّدة: رأس ثابت، بحث، تصفية لكل عمود، ترتيب، تحديد متعدد وإجراءات جماعية ─────
+  function tableHtml(key,cols,rows){
+    var th='<th class="chk" data-nosort><input type="checkbox" class="bulk-all" aria-label="'+T("تحديد الكل","Select all")+'"></th>';
+    cols.forEach(function(c){
+      th+='<th'+(c.filter?' data-filter="'+c.filter+'"':'')+(c.sort?' data-sort="'+c.sort+'"':'')+(c.act?' class="act" data-nosort':'')+'>'+c.h+'</th>';
+    });
+    return '<div class="bulk-bar" id="bar-'+key+'"></div><div class="dt-wrap"><table data-table data-key="'+key+'"><thead><tr>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
+  function chkCell(id){return '<td class="chk"><input type="checkbox" class="bulk-item" value="'+esc(id)+'" aria-label="'+T("تحديد","Select")+'"></td>';}
+  function mountTable(box,key,actions,run){
+    if(window.dtInit)window.dtInit(box);
+    var bar=box.querySelector("#bar-"+key),table=box.querySelector("table"),all=table.querySelector(".bulk-all");
+    bar.innerHTML='<span class="bulk-count"></span>'+actions.map(function(a){
+      return '<button type="button" class="hbtn '+(a.danger?"danger":"sec")+' sm" data-act="'+a.id+'" disabled>'+a.label+'</button>';}).join("");
+    function items(){return [].slice.call(table.querySelectorAll("tbody .bulk-item"));}
+    function sel(){return items().filter(function(i){return i.checked&&!i.closest("tr").hidden;}).map(function(i){return i.value;});}
+    function refresh(){
+      var n=sel().length;
+      bar.querySelector(".bulk-count").textContent=n?T("المحدد: ","Selected: ")+n:T("لم يُحدَّد شيء","Nothing selected");
+      [].forEach.call(bar.querySelectorAll("button"),function(b){b.disabled=!n;});
+      var vis=items().filter(function(i){return !i.closest("tr").hidden;});
+      all.checked=!!vis.length&&vis.every(function(i){return i.checked;});
+    }
+    all.addEventListener("change",function(){items().forEach(function(i){if(!i.closest("tr").hidden)i.checked=all.checked;});refresh();});
+    table.addEventListener("change",function(e){if(e.target.classList.contains("bulk-item"))refresh();});
+    table.addEventListener("input",function(){setTimeout(refresh,0);});
+    bar.addEventListener("click",function(e){
+      var b=e.target.closest("button");if(!b)return;
+      var ids=sel(),a=actions.filter(function(x){return x.id===b.getAttribute("data-act");})[0];
+      if(!ids.length)return;
+      if(a.danger&&!confirm(a.label+" ("+ids.length+")?"))return;
+      run(a.id,ids);
+    });
+    refresh();
+  }
+  function bulkDone(r){
+    var m=T("تم: ","Done: ")+(r.done||0);
+    if(r.skipped)m+=" — "+T("المستبعد: ","Skipped: ")+r.skipped;
+    if(r.notes&&r.notes.length)m+=" — "+r.notes.join("; ");
+    showSt(m,"ok");
+  }
+  function nodata(icon,txt){return '<div class="nodata"><i class="fas fa-'+icon+'"></i>'+txt+'</div>';}
+
+  // ───── clock ─────
+  function ammanNow(){
+    var p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Amman',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'})
+      .formatToParts(new Date()).reduce(function(a,x){a[x.type]=x.value;return a;},{});
+    return p.year+'-'+p.month+'-'+p.day+' | '+p.hour+':'+p.minute+':'+p.second;
+  }
+  function updateClock(){var el=document.getElementById("clockEl");if(el){el.dir="ltr";el.textContent=ammanNow();}}
   setInterval(updateClock,1000);
 
   // ───── DOM ready ─────
@@ -52,11 +100,16 @@
   });
 
   function bootstrap(){
-    api("/api/admin/bookings?status=all").then(function(d){
+    api("/api/admin/session").then(function(ss){
+      if(!ss.loggedIn)return null;
+      window.CSRF=ss.csrf||window.CSRF;
+      return api("/api/admin/bookings?status=all");
+    }).then(function(d){
+      if(!d)return;
       isLoggedIn=true;
       document.getElementById("loginOverlay").style.display="none";
       allData=d;renderTable(d);updateStats(d);
-      loadHallsAdmin();loadBlk();loadContacts();loadStats();loadBlkHalls();
+      loadHallsAdmin();loadBlk();loadContacts();loadStats();loadBlkHalls();loadUsers();loadSettings();
     }).catch(function(){
       // not logged in — leave overlay visible
     });
@@ -69,11 +122,11 @@
     var er=document.getElementById("loginErr");
     if(!u||!p){er.textContent=lang==="ar"?"الرجاء إدخال اسم المستخدم وكلمة المرور":"Please enter username and password";er.style.display="block";return;}
     api("/api/admin/login",{method:"POST",body:{username:u,password:p}}).then(function(res){
-      if(res&&res.success){isLoggedIn=true;document.getElementById("loginOverlay").style.display="none";bootstrap();}
+      if(res&&res.success){window.CSRF=res.csrf||"";isLoggedIn=true;document.getElementById("loginOverlay").style.display="none";bootstrap();}
       else{er.textContent=lang==="ar"?"اسم المستخدم أو كلمة المرور غير صحيحة":"Invalid username or password";er.style.display="block";document.getElementById("loginPass").value="";}
     }).catch(function(){er.textContent=lang==="ar"?"اسم المستخدم أو كلمة المرور غير صحيحة":"Invalid username or password";er.style.display="block";});
   };
-  window.doLogout=function(){window.top.location.href="/?lang="+lang;};
+  window.doLogout=function(){api("/api/admin/logout",{method:"POST"}).then(function(){window.top.location.href="/?lang="+lang;}).catch(function(){window.top.location.href="/?lang="+lang;});};
 
   // ───── halls (for blocked-period select + edit-booking select) ─────
   function loadBlkHalls(){
@@ -141,41 +194,53 @@
 
   function renderTable(d){
     var c=document.getElementById("reqTable");
-    if(!d.length){c.innerHTML='<div class="nodata"><i class="fas fa-inbox"></i>'+(lang==="ar"?"لا توجد طلبات":"No requests")+'</div>';return;}
-    var h='<table><thead><tr><th>'+(lang==="ar"?"رقم الطلب":"ID")+'</th><th>'+(lang==="ar"?"الاسم":"Name")+'</th><th>'+(lang==="ar"?"المناسبة":"Event")+'</th><th>'+(lang==="ar"?"القاعة":"Venue")+'</th><th style="min-width:90px">'+(lang==="ar"?"التاريخ":"Date")+'</th><th style="min-width:70px">'+(lang==="ar"?"الوقت":"Time")+'</th><th>'+(lang==="ar"?"الحالة":"Status")+'</th><th>'+(lang==="ar"?"إجراءات":"Actions")+'</th></tr></thead><tbody>';
+    if(!d.length){c.innerHTML=nodata("inbox",T("لا توجد طلبات","No requests"));return;}
+    var cols=[{h:T("رقم الطلب","ID"),filter:"text"},{h:T("الاسم","Name"),filter:"text"},{h:T("المناسبة","Event"),filter:"text"},
+      {h:T("القاعة","Venue"),filter:"select"},{h:T("التاريخ","Date"),filter:"text"},{h:T("الوقت","Time"),filter:"text"},
+      {h:T("الحالة","Status"),filter:"select"},{h:T("إجراءات","Actions"),act:true}];
+    var rows="";
     for(var i=0;i<d.length;i++){
-      var r=d[i];
-      var isMulti=r.endDate&&r.endDate!==r.date;
-      var dateDisp=fmtD(r.date);
-      if(isMulti)dateDisp+='<br><span style="font-size:10px;color:#1a5c64;font-weight:600">→ '+fmtD(r.endDate)+'</span>';
-      var timeTxt=r.fullDay?(lang==="ar"?"يوم كامل":"Full Day"):(esc(r.startTime)+(r.endTime?" - "+esc(r.endTime):""));
-      h+='<tr><td style="font-weight:700;color:#247680;white-space:nowrap;font-size:11px">'+esc(r.reqId)+'</td>'
-        +'<td>'+esc(r.name)+(r.behalf?'<br><span style="font-size:11px;color:#80868b">'+esc(r.behalf)+'</span>':'')+'</td>'
-        +'<td>'+esc(r.title)+(isMulti?'<br><span class="multiday-tag"><i class="fas fa-calendar-week"></i> '+(lang==="ar"?"متعدد الأيام":"Multi-day")+'</span>':'')+'</td>'
-        +'<td>'+esc(r.hall)+'</td>'
-        +'<td style="white-space:nowrap;font-size:12px">'+dateDisp+'</td>'
-        +'<td style="white-space:nowrap;font-size:12px">'+timeTxt+'</td>'
-        +'<td><span class="st-tag '+r.status+'">'+stLbl(r.status)+'</span>';
-      if(r.status==="rejected"&&r.rejectReason)h+='<div class="rj-reason">'+esc(r.rejectReason)+'</div>';
-      h+='</td><td><div class="tbl-actions">';
-      var att=r.attachments||r.att||[];
-      if(att&&att.length)for(var j=0;j<att.length;j++)if(att[j])h+='<a href="'+esc(att[j])+'" target="_blank" class="att-link"><i class="fas fa-paperclip"></i></a>';
-      h+='<button class="tbl-btn edit-bk" onclick="openEditBk(\''+esc(r.reqId)+'\')"><i class="fas fa-pen"></i></button>';
+      var r=d[i],isMulti=r.endDate&&r.endDate!==r.date;
+      var dateDisp='<span dir="ltr">'+fmtD(r.date)+'</span>';
+      if(isMulti)dateDisp+='<br><span class="sub-line">→ <span dir="ltr">'+fmtD(r.endDate)+'</span></span>';
+      var timeTxt=r.fullDay?T("يوم كامل","Full Day"):('<span dir="ltr">'+esc(r.startTime)+(r.endTime?" - "+esc(r.endTime):"")+'</span>');
+      rows+='<tr>'+chkCell(r.reqId)
+        +'<td class="id-cell">'+esc(r.reqId)+'</td>'
+        +'<td><bdi>'+esc(r.name)+'</bdi>'+(r.behalf?'<br><span class="sub-line"><bdi>'+esc(r.behalf)+'</bdi></span>':'')+'</td>'
+        +'<td><bdi>'+esc(r.title)+'</bdi>'+(isMulti?'<br><span class="multiday-tag"><i class="fas fa-calendar-week"></i> '+T("متعدد الأيام","Multi-day")+'</span>':'')+'</td>'
+        +'<td data-value="'+esc(r.hall)+'"><bdi>'+esc(r.hall)+'</bdi></td>'
+        +'<td'+isoVal(r.date)+' style="white-space:nowrap">'+dateDisp+'</td>'
+        +'<td style="white-space:nowrap">'+timeTxt+'</td>'
+        +'<td data-value="'+esc(stLbl(r.status))+'"><span class="st-tag '+r.status+'">'+stLbl(r.status)+'</span>';
+      if(r.status==="rejected"&&r.rejectReason)rows+='<div class="rj-reason"><bdi>'+esc(r.rejectReason)+'</bdi></div>';
+      rows+='</td><td class="act"><div class="tbl-actions">';
+      var att=r.attachments||[];
+      for(var j=0;j<att.length;j++)rows+='<a href="'+esc(att[j])+'" target="_blank" rel="noopener" class="att-link" aria-label="'+T("مرفق","Attachment")+'"><i class="fas fa-paperclip"></i></a>';
+      rows+='<button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick="openEditBk(\''+esc(r.reqId)+'\')"><i class="fas fa-pen"></i></button>';
       if(r.status==="pending"){
-        h+='<button class="tbl-btn approve" onclick="showBccInput(\''+esc(r.reqId)+'\')"><i class="fas fa-check"></i></button>';
-        h+='<button class="tbl-btn reject" onclick="showRjInput(\''+esc(r.reqId)+'\')"><i class="fas fa-times"></i></button>';
+        rows+='<button class="tbl-btn approve" title="'+T("موافقة","Approve")+'" aria-label="'+T("موافقة","Approve")+'" onclick="showBccInput(\''+esc(r.reqId)+'\')"><i class="fas fa-check"></i></button>';
+        rows+='<button class="tbl-btn reject" title="'+T("رفض","Reject")+'" aria-label="'+T("رفض","Reject")+'" onclick="showRjInput(\''+esc(r.reqId)+'\')"><i class="fas fa-times"></i></button>';
       }
-      if(r.status!=="cancelled")h+='<button class="tbl-btn cancel-btn" onclick="doCancel(\''+esc(r.reqId)+'\')"><i class="fas fa-ban"></i></button>';
-      if(r.status!=="pending"&&r.status!=="cancelled")h+='<button class="tbl-btn pend-btn" onclick="doPending(\''+esc(r.reqId)+'\')"><i class="fas fa-undo"></i></button>';
-      h+='</div>';
+      if(r.status!=="cancelled")rows+='<button class="tbl-btn cancel-btn" title="'+T("إلغاء","Cancel")+'" aria-label="'+T("إلغاء","Cancel")+'" onclick="doCancel(\''+esc(r.reqId)+'\')"><i class="fas fa-ban"></i></button>';
+      if(r.status!=="pending"&&r.status!=="cancelled")rows+='<button class="tbl-btn pend-btn" title="'+T("إرجاع إلى قيد المراجعة","Back to pending")+'" aria-label="'+T("إرجاع إلى قيد المراجعة","Back to pending")+'" onclick="doPending(\''+esc(r.reqId)+'\')"><i class="fas fa-undo"></i></button>';
+      rows+='</div>';
       if(r.status==="pending"){
-        h+='<div class="bcc-info" style="display:none" id="bcc-info-'+esc(r.reqId)+'"><i class="fas fa-info-circle"></i> '+(lang==="ar"?"يُرسل إبلاغ تلقائي لجهات الاتصال المسجلة":"Auto-sent to registered contacts")+'</div>';
-        h+='<div class="bcc-input" id="ci-'+esc(r.reqId)+'"><input type="text" id="cc-'+esc(r.reqId)+'" placeholder="'+(lang==="ar"?"إيميلات إبلاغ إضافية (;)":"Additional BCC emails (;)")+'" dir="ltr"><button onclick="doApprove(\''+esc(r.reqId)+'\')"><i class="fas fa-check"></i></button></div>';
-        h+='<div class="rj-input" id="ri-'+esc(r.reqId)+'"><input type="text" id="rr-'+esc(r.reqId)+'" placeholder="'+(lang==="ar"?"سبب الرفض...":"Rejection reason...")+'"><button onclick="doReject(\''+esc(r.reqId)+'\')"><i class="fas fa-times"></i></button></div>';
+        rows+='<div class="bcc-info" style="display:none" id="bcc-info-'+esc(r.reqId)+'"><i class="fas fa-info-circle"></i> '+T("يُرسل إبلاغ تلقائي لجهات الاتصال المسجلة","Auto-sent to registered contacts")+'</div>';
+        rows+='<div class="bcc-input" id="ci-'+esc(r.reqId)+'"><input type="text" id="cc-'+esc(r.reqId)+'" placeholder="'+T("بريد إبلاغ إضافي (افصل بفاصلة)","Additional BCC emails (comma-separated)")+'" dir="ltr"><button aria-label="'+T("موافقة","Approve")+'" onclick="doApprove(\''+esc(r.reqId)+'\')"><i class="fas fa-check"></i></button></div>';
+        rows+='<div class="rj-input" id="ri-'+esc(r.reqId)+'"><input type="text" id="rr-'+esc(r.reqId)+'" placeholder="'+T("سبب الرفض","Rejection reason")+'"><button aria-label="'+T("رفض","Reject")+'" onclick="doReject(\''+esc(r.reqId)+'\')"><i class="fas fa-times"></i></button></div>';
       }
-      h+='</td></tr>';
+      rows+='</td></tr>';
     }
-    h+='</tbody></table>';c.innerHTML=h;
+    c.innerHTML=tableHtml("bk",cols,rows);
+    mountTable(c,"bk",[
+      {id:"approve",label:T("موافقة","Approve")},{id:"reject",label:T("رفض","Reject")},
+      {id:"cancel",label:T("إلغاء الحجز","Cancel booking"),danger:true},{id:"pending",label:T("إرجاع إلى قيد المراجعة","Back to pending")},
+      {id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
+        var body={action:action,reqIds:ids};
+        if(action==="reject"){var rs=prompt(T("سبب الرفض:","Rejection reason:"));if(!rs)return;body.reason=rs;}
+        api("/api/admin/bookings/bulk",{method:"POST",body:body}).then(function(r){bulkDone(r);loadData("all");})
+          .catch(function(e){showSt(e.message,"err");});
+      });
   }
 
   // row actions
@@ -267,22 +332,29 @@
   function loadHallsAdmin(){
     api("/api/admin/halls").then(function(d){
       var c=document.getElementById("hallsList");
-      if(!d.length){c.innerHTML='<div class="nodata" style="padding:15px"><i class="fas fa-check-circle" style="font-size:24px"></i>'+(lang==="ar"?"لا توجد قاعات":"No venues")+'</div>';return;}
-      var h="";
-      for(var i=0;i<d.length;i++){
-        var it=d[i];
-        h+='<div class="hi"><div class="info"><div class="name">'+esc(it.nameAr)+(it.nameEn?" ("+esc(it.nameEn)+")":"")+'</div><div class="meta">';
-        if(it.code)h+=(lang==="ar"?"رمز":"Code")+": "+esc(it.code)+" | ";
-        if(it.capacity)h+=(lang==="ar"?"سعة":"Cap")+": "+esc(it.capacity)+" | ";
-        if(it.location)h+=(lang==="ar"?"موقع":"Loc")+": "+esc(it.location)+" | ";
-        h+=(it.active?'<span style="color:#27ae60">'+(lang==="ar"?"فعالة":"Active")+'</span>':'<span style="color:#e74c3c">'+(lang==="ar"?"معطلة":"Inactive")+'</span>');
-        if(it.requiresApproval)h+=' | <span style="color:#EBB37B">'+(lang==="ar"?"تتطلب موافقة":"Needs Approval")+'</span>';
-        h+='</div>';
-        if(it.description)h+='<div class="desc-text">'+esc(it.description)+'</div>';
-        if(it.equipment)h+='<div class="meta" style="margin-top:2px"><i class="fas fa-tools" style="margin:0 4px;color:#247680"></i>'+esc(it.equipment)+'</div>';
-        h+='</div><div class="acts"><button class="edit-btn" onclick="openEdit('+it.id+')"><i class="fas fa-edit"></i> '+(lang==="ar"?"تعديل":"Edit")+'</button><button class="del-btn" onclick="delHall('+it.id+')"><i class="fas fa-trash"></i></button></div></div>';
-      }
-      c.innerHTML=h;
+      if(!d.length){c.innerHTML=nodata("door-open",T("لا توجد قاعات","No venues"));return;}
+      var cols=[{h:T("الاسم","Name"),filter:"text"},{h:T("الرمز","Code"),filter:"text"},{h:T("السعة","Capacity"),sort:"num"},
+        {h:T("الموقع","Location"),filter:"text"},{h:T("الحالة","Status"),filter:"select"},{h:T("الحجوزات","Bookings"),sort:"num"},
+        {h:T("إجراءات","Actions"),act:true}];
+      var rows="";
+      d.forEach(function(it){
+        var st=it.active?T("فعالة","Active"):T("موقوفة","Inactive");
+        rows+='<tr>'+chkCell(it.id)
+          +'<td><strong><bdi>'+esc(it.nameAr)+'</bdi></strong>'+(it.nameEn?'<br><span class="sub-line" dir="ltr">'+esc(it.nameEn)+'</span>':'')
+          +(it.requiresApproval?'<br><span class="multiday-tag">'+T("تتطلب موافقة","Needs approval")+'</span>':'')+'</td>'
+          +'<td dir="ltr">'+esc(it.code||"")+'</td><td data-value="'+esc(it.capacity||0)+'">'+esc(it.capacity||"")+'</td>'
+          +'<td><bdi>'+esc(it.location||"")+'</bdi></td>'
+          +'<td data-value="'+esc(st)+'"><span class="st-tag '+(it.active?"approved":"cancelled")+'">'+st+'</span></td>'
+          +'<td data-value="'+it.bookings+'">'+it.bookings+'</td>'
+          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick="openEdit('+it.id+')"><i class="fas fa-edit"></i></button>'
+          +'<button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delHall('+it.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
+      });
+      c.innerHTML=tableHtml("halls",cols,rows);
+      mountTable(c,"halls",[{id:"activate",label:T("تفعيل","Activate")},{id:"deactivate",label:T("إيقاف","Deactivate")},
+        {id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
+          api("/api/admin/halls/bulk",{method:"POST",body:{action:action,ids:ids}}).then(function(r){bulkDone(r);loadHallsAdmin();loadBlkHalls();})
+            .catch(function(e){showSt(e.message,"err");});
+        });
     });
   }
   window.addNewHall=function(){
@@ -357,15 +429,23 @@
   function loadBlk(){
     api("/api/admin/blocked").then(function(d){
       var c=document.getElementById("blkList");
-      if(!d.length){c.innerHTML='<div class="nodata" style="padding:15px"><i class="fas fa-check-circle" style="font-size:24px"></i>'+(lang==="ar"?"لا توجد فترات غير متاحة":"No unavailable periods")+'</div>';return;}
-      var h="";
-      for(var i=0;i<d.length;i++){
-        var it=d[i];
-        var timeInfo=it.fromT&&it.toT?" | ⏰ "+esc(it.fromT)+" – "+esc(it.toT):" | "+(lang==="ar"?"يوم كامل":"Full Day");
-        var hallInfo=it.hall?" | 📍 "+esc(it.hall):" | "+(lang==="ar"?"كل القاعات":"All Venues");
-        h+='<div class="bi"><span><i class="fas fa-ban" style="color:#e74c3c;margin:0 6px"></i>'+fmtD(esc(it.start))+" — "+fmtD(esc(it.end))+hallInfo+timeInfo+" | "+esc(it.reason)+'</span><button class="del" onclick="delBlk('+it.id+')"><i class="fas fa-trash"></i></button></div>';
-      }
-      c.innerHTML=h;
+      if(!d.length){c.innerHTML=nodata("check-circle",T("لا توجد فترات غير متاحة","No unavailable periods"));return;}
+      var cols=[{h:T("من","From"),filter:"text"},{h:T("إلى","To"),filter:"text"},{h:T("القاعة","Venue"),filter:"select"},
+        {h:T("الوقت","Time"),filter:"text"},{h:T("السبب","Reason"),filter:"text"},{h:T("إجراءات","Actions"),act:true}];
+      var rows="";
+      d.forEach(function(it){
+        var hall=it.hall||T("كل القاعات","All venues");
+        rows+='<tr>'+chkCell(it.id)+'<td'+isoVal(it.start)+' dir="ltr">'+fmtD(it.start)+'</td><td'+isoVal(it.end)+' dir="ltr">'+fmtD(it.end)+'</td>'
+          +'<td data-value="'+esc(hall)+'"><bdi>'+esc(hall)+'</bdi></td>'
+          +'<td>'+(it.fromT&&it.toT?'<span dir="ltr">'+esc(it.fromT)+' – '+esc(it.toT)+'</span>':T("يوم كامل","Full day"))+'</td>'
+          +'<td><bdi>'+esc(it.reason)+'</bdi></td>'
+          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delBlk('+it.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
+      });
+      c.innerHTML=tableHtml("blk",cols,rows);
+      mountTable(c,"blk",[{id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
+        api("/api/admin/blocked/bulk",{method:"POST",body:{ids:ids}}).then(function(r){bulkDone(r);loadBlk();})
+          .catch(function(e){showSt(e.message,"err");});
+      });
     });
   }
   window.addBlk=function(){
@@ -392,21 +472,31 @@
   function loadContacts(){
     api("/api/admin/contacts").then(function(d){
       var c=document.getElementById("contactsList");
-      if(!d.length){c.innerHTML='<div class="nodata" style="padding:20px"><i class="fas fa-address-book" style="font-size:28px"></i><br>'+(lang==="ar"?"لا توجد جهات اتصال بعد":"No contacts yet")+'</div>';return;}
-      var h='<div class="ct-header"><div><i class="fas fa-users"></i> '+(lang==="ar"?"قائمة جهات الاتصال":"Contacts List")+'</div><div class="ct-count">'+d.length+(lang==="ar"?" جهة":" contacts")+'</div></div><div class="ct-list-container">';
-      for(var i=0;i<d.length;i++){
-        h+='<div class="ct-item"><div class="ct-info"><div class="ct-icon"><i class="fas fa-user"></i></div><div class="ct-details"><div class="ct-email">'+esc(d[i].email)+'</div>';
-        if(d[i].name)h+='<div class="ct-name">'+esc(d[i].name)+'</div>';
-        if(d[i].addedAt)h+='<div class="ct-date"><i class="fas fa-clock" style="margin:0 4px"></i>'+esc(d[i].addedAt)+'</div>';
-        h+='</div></div><button class="del" onclick="delContact('+d[i].id+')" title="'+(lang==="ar"?"حذف":"Delete")+'"><i class="fas fa-trash"></i></button></div>';
-      }
-      h+='</div>';c.innerHTML=h;
+      if(!d.length){c.innerHTML=nodata("address-book",T("لا توجد جهات اتصال بعد","No contacts yet"));return;}
+      var cols=[{h:T("البريد الإلكتروني","Email"),filter:"text"},{h:T("الاسم","Name"),filter:"text"},{h:T("تاريخ الإضافة","Added"),filter:"text"},{h:T("إجراءات","Actions"),act:true}];
+      var rows="";
+      d.forEach(function(it){
+        rows+='<tr>'+chkCell(it.id)+'<td dir="ltr">'+esc(it.email)+'</td><td><bdi>'+esc(it.name)+'</bdi></td><td dir="ltr" data-value="'+esc(it.addedAt)+'">'+esc(it.addedAt)+'</td>'
+          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick="editContact('+it.id+',\''+esc(it.email).replace(/'/g,"")+'\',\''+esc(it.name).replace(/'/g,"")+'\')"><i class="fas fa-edit"></i></button>'
+          +'<button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delContact('+it.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
+      });
+      c.innerHTML=tableHtml("ct",cols,rows);
+      mountTable(c,"ct",[{id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
+        api("/api/admin/contacts/bulk",{method:"POST",body:{ids:ids}}).then(function(r){bulkDone(r);loadContacts();})
+          .catch(function(e){showSt(e.message,"err");});
+      });
     });
   }
+  window.editContact=function(id,email,name){
+    var e=prompt(T("البريد الإلكتروني:","Email:"),email);if(e===null)return;
+    var n=prompt(T("الاسم:","Name:"),name);if(n===null)return;
+    api("/api/admin/contacts/update",{method:"POST",body:{id:id,email:e.trim(),name:n.trim()}}).then(function(){showSt(T("تم الحفظ","Saved"),"ok");loadContacts();})
+      .catch(function(er){showSt(er.message,"err");});
+  };
   window.addSingleContact=function(){
     var em=document.getElementById("ctEmail").value.trim();
     var nm=document.getElementById("ctName").value.trim();
-    if(!em||em.indexOf("@")<0||em.indexOf("@")>=em.length-1){showSt(lang==="ar"?"الرجاء إدخال إيميل صحيح":"Please enter valid email","err");return;}
+    if(!em||em.indexOf("@")<0||em.indexOf("@")>=em.length-1){showSt(lang==="ar"?"الرجاء إدخال بريد إلكتروني صحيح":"Please enter valid email","err");return;}
     api("/api/admin/contacts/add",{method:"POST",body:{list:[{email:em,name:nm}]}})
       .then(function(r){
         showSt((lang==="ar"?"تمت إضافة ":"Added ")+(r.count||1)+(lang==="ar"?" جهة اتصال":" contact(s)"),"ok");
@@ -428,7 +518,7 @@
         var parts=lines[i].split(",");var email=parts[0].trim();
         if(email&&email.indexOf("@")>=0&&email.indexOf("@")<email.length-1)list.push({email:email,name:(parts[1]||"").trim()});
       }
-      if(!list.length){showSt(lang==="ar"?"لم يتم العثور على إيميلات صالحة":"No valid emails found","err");return;}
+      if(!list.length){showSt(lang==="ar"?"لم يتم العثور على عناوين بريد صالحة":"No valid emails found","err");return;}
       api("/api/admin/contacts/add",{method:"POST",body:{list:list}})
         .then(function(r){showSt((lang==="ar"?"تمت إضافة ":"Added ")+(r.count||0)+(lang==="ar"?" جهة اتصال":" contact(s)"),"ok");loadContacts();})
         .catch(function(err){showSt("Error: "+err.message,"err");});
@@ -445,7 +535,7 @@
   }
   function renderTopChart(data){
     var c=document.getElementById("chartTop");
-    if(!data||!data.length){c.innerHTML='<div class="nodata" style="padding:10px;font-size:12px">'+(lang==="ar"?"لا توجد بيانات":"No data")+'</div>';return;}
+    if(!data||!data.length){c.innerHTML='<div class="nodata" style="padding:10px;font-size:13px">'+(lang==="ar"?"لا توجد بيانات":"No data")+'</div>';return;}
     var mx=data[0].count;var h="";
     for(var i=0;i<Math.min(data.length,8);i++){
       var pct=mx>0?Math.round(data[i].count/mx*100):0;
@@ -456,8 +546,8 @@
   function renderPeriodStats(s){
     var c=document.getElementById("periodStats");
     var h='<table class="period-table"><thead><tr><th>'+(lang==="ar"?"الفترة":"Period")+'</th><th>'+(lang==="ar"?"المعتمدة":"Approved")+'</th><th>'+(lang==="ar"?"الكل":"Total")+'</th></tr></thead><tbody>'
-      +'<tr><td>'+(lang==="ar"?"اليوم":"Today")+'</td><td style="font-weight:700;color:#27ae60">'+s.today+'</td><td>'+s.total+'</td></tr>'
-      +'<tr><td>'+(lang==="ar"?"هذا الأسبوع":"This Week")+'</td><td style="font-weight:700;color:#27ae60">'+s.week+'</td><td>'+s.total+'</td></tr>'
+      +'<tr><td>'+(lang==="ar"?"اليوم":"Today")+'</td><td style="font-weight:700;color:#1e8449">'+s.today+'</td><td>'+s.total+'</td></tr>'
+      +'<tr><td>'+(lang==="ar"?"هذا الأسبوع":"This Week")+'</td><td style="font-weight:700;color:#1e8449">'+s.week+'</td><td>'+s.total+'</td></tr>'
       +'<tr><td>'+(lang==="ar"?"المعلّقة":"Pending")+'</td><td style="font-weight:700;color:#EBB37B">'+s.pending+'</td><td>'+s.total+'</td></tr>'
       +'</tbody></table>';
     c.innerHTML=h;
@@ -521,7 +611,7 @@
     c.innerHTML=h;
     var th='<table class="period-table"><thead><tr><th>'+(lang==="ar"?"العنصر":"Item")+'</th><th>'+(lang==="ar"?"عدد الحجوزات":"Bookings")+'</th><th>'+(lang==="ar"?"معتمدة":"Approved")+'</th><th>'+(lang==="ar"?"قيد المراجعة":"Pending")+'</th><th>'+(lang==="ar"?"الساعات (تقريباً)":"Est. Hours")+'</th></tr></thead><tbody>';
     for(var i=0;i<arr.length;i++){
-      th+='<tr><td style="font-weight:700">'+esc(arr[i].key)+'</td><td>'+arr[i].data.count+'</td><td style="color:#27ae60">'+arr[i].data.approved+'</td><td style="color:#EBB37B">'+arr[i].data.pending+'</td><td>'+arr[i].data.hours.toFixed(1)+'</td></tr>';
+      th+='<tr><td style="font-weight:700">'+esc(arr[i].key)+'</td><td>'+arr[i].data.count+'</td><td style="color:#1e8449">'+arr[i].data.approved+'</td><td style="color:#EBB37B">'+arr[i].data.pending+'</td><td>'+arr[i].data.hours.toFixed(1)+'</td></tr>';
     }
     th+='</tbody></table>';document.getElementById("anaTable").innerHTML=th;
   };
@@ -532,8 +622,8 @@
     var rc=document.getElementById("tc-reports").innerHTML;
     var orgName=lang==="ar"?ORG_AR:ORG_EN;
     var w=window.open("","_blank");
-    var dt=new Date().toLocaleDateString(lang==="ar"?"ar-SA":"en-US",{year:"numeric",month:"long",day:"numeric"});
-    w.document.write("<html dir='"+dir+"' lang='"+lang+"'><head><title>"+(lang==="ar"?"تقرير الحجوزات":"Booking Report")+"</title><link href='https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap' rel='stylesheet'><style>body{font-family:Tajawal,sans-serif;padding:40px;max-width:800px;margin:0 auto;background:#fff;color:#333} .report-header{text-align:center;margin-bottom:40px;padding-bottom:25px;border-bottom:4px solid #EBB37B} .report-header img{height:90px;margin-bottom:20px} .report-header h1{color:#1a5c64;font-size:32px;margin:0;font-weight:800} .report-header h1 span{color:#EBB37B} .report-header p{color:#555;font-size:16px;margin:10px 0 0} table{width:100%;border-collapse:collapse;margin-top:20px} th,td{border:1px solid #ddd;padding:12px;text-align:"+(dir==="rtl"?"right":"left")+";font-size:13px} th{background:#1a5c64;color:#fff;font-weight:700} tr:nth-child(even){background:#f8f9fa} .bar-chart{display:flex;flex-direction:column;gap:8px} .bar-item{display:flex;align-items:center;margin-bottom:10px} .bar-label{font-size:13px;font-weight:600;color:#1a5c64;min-width:140px} .bar-track{flex:1;height:28px;background:#e8eaed;border-radius:8px;overflow:hidden} .bar-fill{height:100%;background:linear-gradient(90deg,#1a5c64,#247680);border-radius:8px;display:flex;align-items:center;justify-content:flex-end;padding:0 10px} .bar-fill span{color:#fff;font-size:12px;font-weight:700} .report-card{margin-bottom:30px;page-break-inside:avoid;background:#fff;border:1px solid #e8eaed;border-radius:12px;padding:25px;box-shadow:0 2px 8px rgba(0,0,0,.05)} h4{color:#1a5c64;margin-bottom:15px;font-size:18px;border-bottom:2px solid #EBB37B;padding-bottom:10px;font-weight:800;display:flex;align-items:center;gap:8px} .period-table th,.period-table td{border:1px solid #ddd;padding:10px;font-size:13px} .period-table th{background:#e8f4f5;color:#1a5c64} .report-grid{display:grid;grid-template-columns:1fr 1fr;gap:25px;margin-bottom:30px} .nodata{text-align:center;padding:20px;color:#aaa;font-size:14px} @media print{body{padding:20px} .report-card{box-shadow:none;border:1px solid #ddd}} button{display:none}</style></head><body><div class='report-header'><img src='"+LOGO_URL+"' alt='Logo'><h1>"+orgName+" <span>| "+(lang==="ar"?"تقرير الحجوزات":"Booking Report")+"</span></h1><p>"+dt+"</p></div>"+rc+"</body></html>");
+    var dt=ammanNow().slice(0,10);
+    w.document.write("<html dir='"+dir+"' lang='"+lang+"'><head><title>"+(lang==="ar"?"تقرير الحجوزات":"Booking Report")+"</title><link href='https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap' rel='stylesheet'><style>body{font-family:Tajawal,sans-serif;padding:40px;max-width:800px;margin:0 auto;background:#fff;color:#333} .report-header{text-align:center;margin-bottom:40px;padding-bottom:25px;border-bottom:4px solid #EBB37B} .report-header img{height:90px;margin-bottom:20px} .report-header h1{color:#1a5c64;font-size:32px;margin:0;font-weight:800} .report-header h1 span{color:#EBB37B} .report-header p{color:#555;font-size:16px;margin:10px 0 0} table{width:100%;border-collapse:collapse;margin-top:20px} th,td{border:1px solid #ddd;padding:12px;text-align:"+(dir==="rtl"?"right":"left")+";font-size:13px} th{background:#1a5c64;color:#fff;font-weight:700} tr:nth-child(even){background:#f8f9fa} .bar-chart{display:flex;flex-direction:column;gap:8px} .bar-item{display:flex;align-items:center;margin-bottom:10px} .bar-label{font-size:13px;font-weight:600;color:#1a5c64;min-width:140px} .bar-track{flex:1;height:28px;background:#e8eaed;border-radius:8px;overflow:hidden} .bar-fill{height:100%;background:linear-gradient(90deg,#1a5c64,#247680);border-radius:8px;display:flex;align-items:center;justify-content:flex-end;padding:0 10px} .bar-fill span{color:#fff;font-size:13px;font-weight:700} .report-card{margin-bottom:30px;page-break-inside:avoid;background:#fff;border:1px solid #e8eaed;border-radius:12px;padding:25px;box-shadow:0 2px 8px rgba(0,0,0,.05)} h4{color:#1a5c64;margin-bottom:15px;font-size:18px;border-bottom:2px solid #EBB37B;padding-bottom:10px;font-weight:800;display:flex;align-items:center;gap:8px} .period-table th,.period-table td{border:1px solid #ddd;padding:10px;font-size:13px} .period-table th{background:#e8f4f5;color:#1a5c64} .report-grid{display:grid;grid-template-columns:1fr 1fr;gap:25px;margin-bottom:30px} .nodata{text-align:center;padding:20px;color:#aaa;font-size:14px} @media print{body{padding:20px} .report-card{box-shadow:none;border:1px solid #ddd}} button{display:none}</style></head><body><div class='report-header'><img src='"+LOGO_URL+"' alt='Logo'><h1>"+orgName+" <span>| "+(lang==="ar"?"تقرير الحجوزات":"Booking Report")+"</span></h1><p>"+dt+"</p></div>"+rc+"</body></html>");
     w.document.close();w.focus();setTimeout(function(){w.print();},600);
   };
 
@@ -604,4 +694,91 @@
   };
   function setH(id,h){var el=document.getElementById(id);if(el)el.innerHTML=h;}
   function setHref(id,href){var el=document.getElementById(id);if(el)el.setAttribute("href",href);}
+
+  // ───── المستخدمون ─────
+  function loadUsers(){
+    api("/api/admin/users").then(function(d){
+      var c=document.getElementById("usersList");if(!c)return;
+      var cols=[{h:T("اسم المستخدم","Username"),filter:"text"},{h:T("الاسم","Name"),filter:"text"},{h:T("البريد","Email"),filter:"text"},
+        {h:T("الحالة","Status"),filter:"select"},{h:T("آخر دخول","Last sign-in"),filter:"text"},{h:T("إجراءات","Actions"),act:true}];
+      var rows="";
+      d.forEach(function(u){
+        var st=u.active?T("فعال","Active"):T("موقوف","Disabled");
+        rows+='<tr>'+chkCell(u.id)+'<td dir="ltr">'+esc(u.username)+(u.me?' <span class="multiday-tag">'+T("حسابك","You")+'</span>':'')+'</td>'
+          +'<td><bdi>'+esc(u.name)+'</bdi></td><td dir="ltr">'+esc(u.email)+'</td>'
+          +'<td data-value="'+esc(st)+'"><span class="st-tag '+(u.active?"approved":"cancelled")+'">'+st+'</span></td>'
+          +'<td dir="ltr" data-value="'+esc(u.lastLogin)+'">'+esc(u.lastLogin)+'</td>'
+          +'<td class="act"><div class="tbl-actions"><button class="tbl-btn edit-bk" title="'+T("تعديل","Edit")+'" aria-label="'+T("تعديل","Edit")+'" onclick=\'openUser('+JSON.stringify(u).replace(/'/g,"&#39;")+')\'><i class="fas fa-edit"></i></button>'
+          +'<button class="tbl-btn cancel-btn" title="'+T("حذف","Delete")+'" aria-label="'+T("حذف","Delete")+'" onclick="delUser('+u.id+')"><i class="fas fa-trash"></i></button></div></td></tr>';
+      });
+      c.innerHTML=tableHtml("users",cols,rows);
+      mountTable(c,"users",[{id:"activate",label:T("تفعيل","Activate")},{id:"deactivate",label:T("إيقاف","Deactivate")},
+        {id:"delete",label:T("حذف","Delete"),danger:true}],function(action,ids){
+          api("/api/admin/users/bulk",{method:"POST",body:{action:action,ids:ids}}).then(function(r){bulkDone(r);loadUsers();})
+            .catch(function(e){showSt(e.message,"err");});
+        });
+    }).catch(function(){});
+  }
+  window.openUser=function(u){
+    u=u||{};
+    document.getElementById("uId").value=u.id||"";
+    document.getElementById("uName").value=u.username||"";
+    document.getElementById("uFull").value=u.name||"";
+    document.getElementById("uEmail").value=u.email||"";
+    document.getElementById("uPass").value="";
+    document.getElementById("uActive").checked=u.id?!!u.active:true;
+    document.getElementById("uTitle").textContent=u.id?T("تعديل مستخدم","Edit user"):T("إضافة مستخدم","Add user");
+    document.getElementById("editUserOverlay").classList.add("open");
+  };
+  window.closeUser=function(){document.getElementById("editUserOverlay").classList.remove("open");};
+  window.saveUser=function(){
+    var id=document.getElementById("uId").value;
+    var body={username:document.getElementById("uName").value.trim(),name:document.getElementById("uFull").value.trim(),
+      email:document.getElementById("uEmail").value.trim(),password:document.getElementById("uPass").value,
+      active:document.getElementById("uActive").checked};
+    if(id)body.id=parseInt(id,10);
+    api(id?"/api/admin/users/update":"/api/admin/users/add",{method:"POST",body:body}).then(function(){
+      showSt(T("تم الحفظ","Saved"),"ok");closeUser();loadUsers();
+    }).catch(function(e){showSt(e.message,"err");});
+  };
+  window.delUser=function(id){
+    if(!confirm(T("حذف هذا المستخدم؟","Delete this user?")))return;
+    api("/api/admin/users/delete/"+id,{method:"POST"}).then(function(){loadUsers();}).catch(function(e){showSt(e.message,"err");});
+  };
+
+  // ───── الإعدادات والهوية ─────
+  function loadSettings(){
+    api("/api/admin/settings").then(function(s){
+      var set=function(id,v){var el=document.getElementById(id);if(el)el.value=v;};
+      set("sOrgAr",s.orgAr);set("sOrgEn",s.orgEn);set("sAccent",s.accent);
+      var img=document.getElementById("sLogoImg");if(img&&s.logo){img.src=s.logo;img.style.display="";}else if(img){img.style.display="none";}
+      var m=document.getElementById("sMail");
+      if(m)m.textContent=s.mail?T("البريد الإلكتروني مُفعَّل (المرسل: ","Email is on (sender: ")+s.sender+")":T("البريد الإلكتروني غير مُعدّ: لا تُرسل رسائل الحجز.","Email is not set up: booking messages are not sent.");
+    }).catch(function(){});
+  }
+  window.saveSettings=function(){
+    api("/api/admin/settings",{method:"POST",body:{orgAr:document.getElementById("sOrgAr").value,orgEn:document.getElementById("sOrgEn").value,
+      accent:document.getElementById("sAccent").value}}).then(function(){showSt(T("تم الحفظ، حدّث الصفحة لرؤية الهوية الجديدة","Saved - refresh the page to see the new identity"),"ok");})
+      .catch(function(e){showSt(e.message,"err");});
+  };
+  window.uploadLogo=function(inp){
+    if(!inp.files||!inp.files[0])return;
+    var fd=new FormData();fd.append("file",inp.files[0]);
+    api("/api/admin/logo",{method:"POST",body:fd}).then(function(){showSt(T("تم رفع الشعار","Logo uploaded"),"ok");loadSettings();})
+      .catch(function(e){showSt(e.message,"err");});
+    inp.value="";
+  };
+  window.removeLogo=function(){
+    if(!confirm(T("إزالة الشعار؟ تظهر أيقونة النظام بدلاً منه.","Remove the logo? The system icon is shown instead.")))return;
+    api("/api/admin/logo/delete",{method:"POST"}).then(function(){showSt(T("تمت الإزالة","Removed"),"ok");loadSettings();});
+  };
+  window.changePassword=function(){
+    var cur=document.getElementById("pwCur").value,nw=document.getElementById("pwNew").value,rp=document.getElementById("pwRep").value;
+    if(nw!==rp){showSt(T("كلمتا المرور الجديدتان غير متطابقتين","The new passwords do not match"),"err");return;}
+    api("/api/admin/password",{method:"POST",body:{current:cur,new:nw}}).then(function(r){
+      window.CSRF=r.csrf||window.CSRF;showSt(T("تم تغيير كلمة المرور","Password changed"),"ok");
+      ["pwCur","pwNew","pwRep"].forEach(function(id){document.getElementById(id).value="";});
+    }).catch(function(e){showSt(e.message,"err");});
+  };
+
 })();

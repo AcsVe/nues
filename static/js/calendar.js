@@ -48,12 +48,7 @@
       String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   }
 
-  function fmtD(ds) {
-    if (!ds) return ds;
-    var p = String(ds).split("-");
-    if (p.length === 3) return p[2] + "/" + p[1] + "/" + p[0];
-    return ds;
-  }
+  function fmtD(ds) { return ds ? String(ds) : ""; }
 
   function pad2(n) { return String(n).padStart(2, "0"); }
 
@@ -63,14 +58,14 @@
   }
 
   /* ── Clock ───────────────────────────────────────────────── */
+  function ammanNow(){
+    var p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Amman',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'})
+      .formatToParts(new Date()).reduce(function(a,x){a[x.type]=x.value;return a;},{});
+    return p.year+'-'+p.month+'-'+p.day+' | '+p.hour+':'+p.minute+':'+p.second;
+  }
   function updateClock() {
-    var n = new Date();
-    var ds = n.toLocaleDateString(lang === "ar" ? "ar-SA" : "en-US",
-      { weekday:"long", year:"numeric", month:"long", day:"numeric" });
-    var ts = n.toLocaleTimeString(lang === "ar" ? "ar-SA" : "en-US",
-      { hour:"2-digit", minute:"2-digit", second:"2-digit" });
     var el = document.getElementById("clockEl");
-    if (el) el.textContent = ds + " | " + ts;
+    if (el) { el.dir = "ltr"; el.textContent = ammanNow(); }
   }
   setInterval(updateClock, 1000);
 
