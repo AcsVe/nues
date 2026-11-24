@@ -59,7 +59,7 @@ sudo systemctl restart $SERVICE
 echo "==> Daily backup (03:15)"
 CRON="15 3 * * * $DIR/.venv/bin/python $DIR/ops/backup.py >> $DIR/logs/backup.log 2>&1"
 mkdir -p "$DIR/logs"
-( crontab -l 2>/dev/null | grep -v "ops/backup.py" ; echo "$CRON" ) | crontab -
+{ crontab -l 2>/dev/null | grep -v "ops/backup.py" || true; echo "$CRON"; } | crontab -
 
 sleep 3
 echo "==> Check"
