@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
+{% include "_head.html" %}
 </head>
 <body class="calendar-page"
       data-lang="{{ lang }}"
@@ -24,7 +25,7 @@
 
     <div class="top-bar">
         <div class="logo-area">
-            <img src="{{ logo }}" alt="Logo">
+            <img src="{{ logo }}" alt="{{ 'شعار المؤسسة' if lang == 'ar' else 'Organization logo' }}">
             <div>
                 <h1 id="hdrTitle">{{ lang == 'ar' and org_ar or org_en }}</h1>
                 <p id="hdrSub">{{ lang == 'ar' and 'نظام حجز القاعات والمرافق' or 'Venue & Facility Booking System' }}</p>
@@ -39,7 +40,7 @@
 
     <div class="wrap">
         <div class="toolbar">
-            <select id="hallFilter" onchange="loadMonth()" aria-label="Filter by venue">
+            <select id="hallFilter" onchange="loadMonth()" aria-label="{{ 'تصفية حسب القاعة' if lang == 'ar' else 'Filter by venue' }}">
                 <option value="">{{ lang == 'ar' and '— كل القاعات —' or '— All Venues —' }}</option>
             </select>
         </div>
@@ -48,8 +49,8 @@
                 <h3 id="mTitle"></h3>
                 <div class="nav-btns">
                     <button class="nav-btn today-btn" id="btnToday" onclick="goToday()">{{ lang == 'ar' and 'اليوم' or 'Today' }}</button>
-                    <button class="nav-btn" onclick="nav(-1)" aria-label="Previous"><i class="fas fa-chevron-{{ lang == 'ar' and 'right' or 'left' }}"></i></button>
-                    <button class="nav-btn" onclick="nav(1)" aria-label="Next"><i class="fas fa-chevron-{{ lang == 'ar' and 'left' or 'right' }}"></i></button>
+                    <button class="nav-btn" onclick="nav(-1)" aria-label="{{ 'السابق' if lang == 'ar' else 'Previous' }}"><i class="fas fa-chevron-{{ lang == 'ar' and 'right' or 'left' }}"></i></button>
+                    <button class="nav-btn" onclick="nav(1)" aria-label="{{ 'التالي' if lang == 'ar' else 'Next' }}"><i class="fas fa-chevron-{{ lang == 'ar' and 'left' or 'right' }}"></i></button>
                 </div>
             </div>
             <div class="cal-grid" id="grid">
@@ -62,9 +63,9 @@
                 <div class="cal-hdr" data-ar="السبت"    data-en="Sat">{{ lang == 'ar' and 'السبت' or 'Sat' }}</div>
             </div>
             <div class="legend">
-                <span><i style="background:#247680"></i> <span id="lgApp">{{ lang == 'ar' and 'معتمد' or 'Approved' }}</span></span>
+                <span><i style="background:var(--accent)"></i> <span id="lgApp">{{ lang == 'ar' and 'معتمد' or 'Approved' }}</span></span>
                 <span><i style="background:#EBB37B"></i> <span id="lgPend">{{ lang == 'ar' and 'قيد المراجعة' or 'Pending' }}</span></span>
-                <span><i style="background:#e74c3c"></i> <span id="lgBlk">{{ lang == 'ar' and 'غير متاح' or 'Blocked' }}</span></span>
+                <span><i style="background:#c0392b"></i> <span id="lgBlk">{{ lang == 'ar' and 'غير متاح' or 'Blocked' }}</span></span>
             </div>
         </div>
     </div>
@@ -73,7 +74,7 @@
         <div class="modal" onclick="event.stopPropagation()">
             <div class="modal-hdr">
                 <h3 id="modalTitle"></h3>
-                <button class="modal-cls" onclick="closeModal()" aria-label="Close"><i class="fas fa-times"></i></button>
+                <button class="modal-cls" onclick="closeModal()" aria-label="{{ 'إغلاق' if lang == 'ar' else 'Close' }}"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body" id="modalBody"></div>
         </div>

@@ -1,158 +1,183 @@
-import requests
-from config import Config
+"""رسائل البريد: الإرسال عبر Microsoft 365 (Graph) بقيم MS_* في ملف .env، وكل نص يدخله المستخدم يُهرَّب قبل وضعه في الرسالة.
+
+إن لم تُضبط القيم لا يتوقف النظام: يُسجَّل في السجل أن البريد لم يُرسل فقط.
+"""
+import time
 from datetime import datetime
+from html import escape
 
-def _sanitize_email(e):
-    if not e: return ''
-    return ''.join(ch for ch in str(e) if ord(ch) > 32 and ch not in '\u200b\u200c\u200d\ufeff\xa0').strip()
+import requests
+from flask import current_app
+
+_token = {'value': None, 'expires': 0}
 
 
-def send_brevo_email(to_email, subject, html_body, bcc_list=None):
-    url = "https://api.brevo.com/v3/smtp/email"
-    headers = {
-        "api-key": Config.BREVO_API_KEY,
-        "Content-Type": "application/json"
-    }
-    to_email = _sanitize_email(to_email)
-    payload = {
-        "sender": {"name": Config.SENDER_NAME, "email": Config.SENDER_EMAIL},
-        "to": [{"email": to_email}],
-        "subject": subject,
-        "htmlContent": html_body
-    }
+def _clean(e):
+    if not e:
+        return ''
+    return ''.join(ch for ch in str(e) if ord(ch) > 32 and ch not in '​‌‍﻿\xa0').strip()
 
-    # Dedupe BCC, skip primary
-    seen = {to_email.lower()}
-    clean_bcc = []
-    for b in (bcc_list or []):
-        bc = _sanitize_email(b).lower()
-        if not bc or '@' not in bc or bc in seen: continue
-        seen.add(bc); clean_bcc.append(bc)
 
+def _access_token():
+    c = current_app.config
+    if not (c.get('MS_TENANT_ID') and c.get('MS_CLIENT_ID') and c.get('MS_CLIENT_SECRET')):
+        return None
+    now = time.time()
+    if _token['value'] and now < _token['expires'] - 60:
+        return _token['value']
     try:
-        if to_email and '@' in to_email:
-            requests.post(url, json=payload, headers=headers, timeout=15)
-        for bcc_email in clean_bcc:
-            bcc_payload = dict(payload)
-            bcc_payload["to"] = [{"email": bcc_email}]
-            requests.post(url, json=bcc_payload, headers=headers, timeout=15)
+        r = requests.post(
+            f"https://login.microsoftonline.com/{c['MS_TENANT_ID']}/oauth2/v2.0/token",
+            data={'client_id': c['MS_CLIENT_ID'], 'client_secret': c['MS_CLIENT_SECRET'],
+                  'scope': 'https://graph.microsoft.com/.default', 'grant_type': 'client_credentials'},
+            timeout=15)
+        if r.status_code != 200:
+            print(f'[email] token request failed: HTTP {r.status_code}', flush=True)
+            return None
+        data = r.json()
+        _token['value'] = data.get('access_token')
+        _token['expires'] = now + int(data.get('expires_in', 3600))
+        return _token['value']
+    except Exception as e:  # noqa: BLE001
+        print(f'[email] token request error: {type(e).__name__}', flush=True)
+        return None
+
+
+def send_email(to_email, subject, html_body, bcc_list=None):
+    """يرسل رسالة واحدة؛ يرجع True عند النجاح. لا يطبع قيم الأسرار."""
+    to_email = _clean(to_email)
+    if not to_email or '@' not in to_email:
+        return False
+    sender = current_app.config.get('MS_SENDER_EMAIL', '')
+    token = _access_token()
+    if not (sender and token):
+        print('[email] Microsoft 365 is not configured - the message was not sent', flush=True)
+        return False
+    seen = {to_email.lower()}
+    bcc = []
+    for b in bcc_list or []:
+        b = _clean(b)
+        if b and '@' in b and b.lower() not in seen:
+            seen.add(b.lower())
+            bcc.append({'emailAddress': {'address': b}})
+    message = {'subject': subject, 'body': {'contentType': 'HTML', 'content': html_body},
+               'toRecipients': [{'emailAddress': {'address': to_email}}]}
+    if bcc:
+        message['bccRecipients'] = bcc[:50]
+    try:
+        r = requests.post(f'https://graph.microsoft.com/v1.0/users/{sender}/sendMail',
+                          headers={'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'},
+                          json={'message': message, 'saveToSentItems': True}, timeout=15)
+        if r.status_code not in (200, 201, 202):
+            print(f'[email] sendMail failed: HTTP {r.status_code}', flush=True)
+            return False
         return True
-    except Exception as e:
-        print(f"Email Error: {e}")
+    except Exception as e:  # noqa: BLE001
+        print(f'[email] sendMail error: {type(e).__name__}', flush=True)
         return False
 
-def generate_email_template(inner_content):
-    yr = datetime.now().year
-    return f"""
-    <!DOCTYPE html>
-    <html>
-    <head><meta charset="UTF-8"></head>
-    <body style="margin:0;padding:0;background-color:#EAEAEA;">
-      <center style="width:100%;background-color:#EAEAEA;">
-        <table role="presentation" width="600" border="0" cellpadding="0" cellspacing="0" style="max-width:600px;border-collapse:collapse;">
-          <tr><td align="center" bgcolor="#1a5c64" style="background-color:#1a5c64;padding:25px;">
-            <img src="{Config.LOGO_URL}" width="80" height="80" style="display:block;" alt="Logo">
-          </td></tr>
-          <tr><td align="center" bgcolor="#1a5c64" style="background-color:#1a5c64;padding:10px 25px 30px;">
-            <font face="Tahoma,Arial,sans-serif" color="#EBB37B" style="font-size:22px;font-weight:bold;">{Config.ORG_AR}</font><br>
-            <font face="Tahoma,Arial,sans-serif" color="#ffffff" style="font-size:12px;">نظام حجز القاعات والمرافق</font>
-          </td></tr>
-          <tr><td bgcolor="#ffffff" dir="rtl" style="background-color:#ffffff;padding:30px 25px;font-family:Tahoma,Arial,sans-serif;color:#333;font-size:14px;line-height:1.7;">
-            {inner_content}
-          </td></tr>
-          <tr><td align="center" bgcolor="#1a5c64" style="background-color:#1a5c64;padding:18px 25px;">
-            <font face="Tahoma,Arial,sans-serif" color="#EBB37B" style="font-size:11px;">&copy; {yr} {Config.ORG_AR} — جميع الحقوق محفوظة</font>
-          </td></tr>
-        </table>
-      </center>
-    </body>
-    </html>
-    """
+
+def graph_ready():
+    c = current_app.config
+    return bool(c.get('MS_TENANT_ID') and c.get('MS_CLIENT_ID') and c.get('MS_CLIENT_SECRET') and c.get('MS_SENDER_EMAIL'))
+
 
 def fmt_date(ds):
-    if not ds: return ds
-    p = ds.split("-")
-    if len(p) == 3: return f"{p[2]}/{p[1]}/{p[0]}"
-    return ds
+    if not ds:
+        return ds
+    p = ds.split('-')
+    return f'{p[2]}/{p[1]}/{p[0]}' if len(p) == 3 else ds
 
-# ── قوالب الإيميلات ──
+
+def _template(inner):
+    from utils.brand import email_logo_url, get_brand
+    b = get_brand()
+    logo = email_logo_url()
+    dark = b['accent_dark']
+    yr = datetime.now().year
+    logo_html = (f'<img src="{escape(logo)}" width="80" height="80" style="display:block;" alt="">' if logo else '')
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background-color:#EAEAEA;"><center style="width:100%;background-color:#EAEAEA;">
+<table role="presentation" width="600" border="0" cellpadding="0" cellspacing="0" style="max-width:600px;border-collapse:collapse;">
+<tr><td align="center" bgcolor="{dark}" style="background-color:{dark};padding:25px;">{logo_html}</td></tr>
+<tr><td align="center" bgcolor="{dark}" style="background-color:{dark};padding:10px 25px 30px;">
+<font face="Tahoma,Arial,sans-serif" color="#EBB37B" style="font-size:22px;font-weight:bold;">{escape(b['org_ar'])}</font><br>
+<font face="Tahoma,Arial,sans-serif" color="#ffffff" style="font-size:13px;">{escape(b['sys_ar'])}</font></td></tr>
+<tr><td bgcolor="#ffffff" dir="rtl" style="background-color:#ffffff;padding:30px 25px;font-family:Tahoma,Arial,sans-serif;color:#333;font-size:14px;line-height:1.7;">{inner}</td></tr>
+<tr><td align="center" bgcolor="{dark}" style="background-color:{dark};padding:18px 25px;">
+<font face="Tahoma,Arial,sans-serif" color="#EBB37B" style="font-size:13px;">&copy; {yr} {escape(b['org_ar'])} — جميع الحقوق محفوظة</font></td></tr>
+</table></center></body></html>"""
+
+
+def _row(label, value, last=False, color=None):
+    border = '' if last else 'border-bottom:1px solid #e0e0e0;'
+    val = f'<font style="font-weight:bold;color:{color};">{escape(str(value))}</font>' if color else escape(str(value))
+    return (f'<tr><td style="background:#f0f7f7;padding:10px 20px;{border}"><font color="#666666" style="font-size:13px;">'
+            f'<strong>{label}:</strong></font> {val}</td></tr>')
+
+
+def _table(rows):
+    return ('<table width="100%" border="0" cellpadding="0" cellspacing="0" dir="rtl" '
+            f'style="border-collapse:collapse;">{"".join(rows)}</table>')
+
+
+def _badge(text, bg, fg='#fff'):
+    return (f'<div style="text-align:center;margin-bottom:20px;background:{bg};color:{fg};padding:8px 25px;'
+            f'display:inline-block;font-weight:bold;">{text}</div><br>')
+
+
+def _full_rows(d, color):
+    return [_row('رقم الطلب', d['reqId'], color=color), _row('المناسبة', d['title']), _row('القاعة', d['hall']),
+            _row('الوقت والتاريخ', f"{d['timeStr']} | {d['dateStr']}", last=True)]
+
+
+def _send(d, subject_prefix, inner, bcc_list):
+    from utils.brand import get_brand
+    send_email(d['email'], f"{subject_prefix} — {d['reqId']} | {get_brand()['org_ar']}", _template(inner), bcc_list)
+
 
 def send_confirm_email(d, bcc_list=None):
-    inner = f"""
-    <div style="text-align:center;margin-bottom:20px;background:#EBB37B;color:#333;padding:8px 25px;display:inline-block;font-weight:bold;">⏳ تم استلام طلبك</div><br>
-    <font face="Tahoma,Arial,sans-serif">مرحباً <strong>{d['name']}</strong>،<br>تم استلام طلب حجزك بنجاح وهو حالياً <strong style="color:#EBB37B;">قيد المراجعة</strong>.</font><br><br>
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" dir="rtl" style="border-collapse:collapse;">
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>رقم الطلب:</strong></font> <font style="font-weight:bold;color:#247680;">{d['reqId']}</font></td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>المناسبة:</strong></font> {d['title']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>القاعة:</strong></font> {d['hall']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;"><font color="#888888" style="font-size:13px;"><strong>الوقت والتاريخ:</strong></font> {d['timeStr']} | {d['dateStr']}</td></tr>
-    </table><br>
-    <font face="Tahoma,Arial,sans-serif" style="font-size:12px;color:#888888;">سيتم إبلاغك بنتيجة المراجعة عبر البريد الإلكتروني.</font>
-    """
-    send_brevo_email(d['email'], f"استلام طلب حجز — {d['reqId']} | {Config.ORG_AR}", generate_email_template(inner), bcc_list)
+    inner = (_badge('⏳ تم استلام طلبك', '#EBB37B', '#333') +
+             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم استلام طلب حجزك بنجاح وهو حالياً <strong>قيد المراجعة</strong>.<br><br>"
+             + _table(_full_rows(d, '#247680')) +
+             '<br><font style="font-size:13px;color:#666666;">سيتم إبلاغك بنتيجة المراجعة عبر البريد الإلكتروني.</font>')
+    _send(d, 'استلام طلب حجز', inner, bcc_list)
+
 
 def send_approve_email(d, bcc_list=None):
-    inner = f"""
-    <div style="text-align:center;margin-bottom:20px;background:#27ae60;color:#fff;padding:8px 25px;display:inline-block;font-weight:bold;">✔️ تمت الموافقة</div><br>
-    <font face="Tahoma,Arial,sans-serif">مرحباً <strong>{d['name']}</strong>،<br>يسعدنا إبلاغك بأنه <strong style="color:#27ae60;">تمت الموافقة</strong> على طلب حجزك.</font><br><br>
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" dir="rtl" style="border-collapse:collapse;">
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>رقم الطلب:</strong></font> <font style="font-weight:bold;color:#27ae60;">{d['reqId']}</font></td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>المناسبة:</strong></font> {d['title']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>القاعة:</strong></font> {d['hall']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;"><font color="#888888" style="font-size:13px;"><strong>الوقت والتاريخ:</strong></font> {d['timeStr']} | {d['dateStr']}</td></tr>
-    </table>
-    """
-    send_brevo_email(d['email'], f"موافقة على طلب حجز — {d['reqId']} | {Config.ORG_AR}", generate_email_template(inner), bcc_list)
+    inner = (_badge('✔️ تمت الموافقة', '#1e8449') +
+             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>يسعدنا إبلاغك بأنه <strong>تمت الموافقة</strong> على طلب حجزك.<br><br>"
+             + _table(_full_rows(d, '#1e8449')))
+    _send(d, 'موافقة على طلب حجز', inner, bcc_list)
+
 
 def send_reject_email(d, bcc_list=None):
-    inner = f"""
-    <div style="text-align:center;margin-bottom:20px;background:#e74c3c;color:#fff;padding:8px 25px;display:inline-block;font-weight:bold;">❌ تم الرفض</div><br>
-    <font face="Tahoma,Arial,sans-serif">مرحباً <strong>{d['name']}</strong>،<br>نأسف لإبلاغك بأنه <strong style="color:#e74c3c;">تم رفض</strong> طلب حجزك.</font><br><br>
-    <div style="background:#fff5f5;padding:12px 20px;border:1px solid #ffcdd2;color:#e74c3c;margin-bottom:15px;"><strong>سبب الرفض:</strong> {d['reason']}</div>
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" dir="rtl" style="border-collapse:collapse;">
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>رقم الطلب:</strong></font> <font style="font-weight:bold;color:#e74c3c;">{d['reqId']}</font></td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;"><font color="#888888" style="font-size:13px;"><strong>المناسبة:</strong></font> {d['title']}</td></tr>
-    </table><br>
-    <font face="Tahoma,Arial,sans-serif" style="font-size:12px;color:#888888;">يمكنك تقديم طلب جديد في أي وقت.</font>
-    """
-    send_brevo_email(d['email'], f"رفض طلب حجز — {d['reqId']} | {Config.ORG_AR}", generate_email_template(inner), bcc_list)
+    inner = (_badge('❌ تم الرفض', '#c0392b') +
+             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>نأسف لإبلاغك بأنه <strong>تم رفض</strong> طلب حجزك.<br><br>"
+             f'<div style="background:#fff5f5;padding:12px 20px;border:1px solid #ffcdd2;color:#a93226;margin-bottom:15px;">'
+             f"<strong>سبب الرفض:</strong> {escape(d.get('reason') or '')}</div>"
+             + _table([_row('رقم الطلب', d['reqId'], color='#c0392b'), _row('المناسبة', d['title'], last=True)]) +
+             '<br><font style="font-size:13px;color:#666666;">يمكنك تقديم طلب جديد في أي وقت.</font>')
+    _send(d, 'رفض طلب حجز', inner, bcc_list)
+
 
 def send_cancel_email(d, bcc_list=None):
-    inner = f"""
-    <div style="text-align:center;margin-bottom:20px;background:#95a5a6;color:#fff;padding:8px 25px;display:inline-block;font-weight:bold;">🗑️ تم الإلغاء</div><br>
-    <font face="Tahoma,Arial,sans-serif">مرحباً <strong>{d['name']}</strong>،<br>تم <strong style="color:#95a5a6;">إلغاء حجزك</strong>.</font><br><br>
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" dir="rtl" style="border-collapse:collapse;">
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>رقم الطلب:</strong></font> <font style="font-weight:bold;color:#95a5a6;">{d['reqId']}</font></td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>المناسبة:</strong></font> {d['title']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;"><font color="#888888" style="font-size:13px;"><strong>القاعة:</strong></font> {d['hall']}</td></tr>
-    </table>
-    """
-    send_brevo_email(d['email'], f"إلغاء حجز — {d['reqId']} | {Config.ORG_AR}", generate_email_template(inner), bcc_list)
+    inner = (_badge('🗑️ تم الإلغاء', '#5d6d7e') +
+             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم <strong>إلغاء حجزك</strong>.<br><br>"
+             + _table([_row('رقم الطلب', d['reqId'], color='#5d6d7e'), _row('المناسبة', d['title']),
+                       _row('القاعة', d['hall'], last=True)]))
+    _send(d, 'إلغاء حجز', inner, bcc_list)
 
 
 def send_pending_email(d, bcc_list=None):
-    inner = f"""
-    <div style="text-align:center;margin-bottom:20px;background:#EBB37B;color:#333;padding:8px 25px;display:inline-block;font-weight:bold;">⏳ حالة الطلب: قيد المراجعة</div><br>
-    <font face="Tahoma,Arial,sans-serif">مرحباً <strong>{d['name']}</strong>،<br>تم إعادة طلب حجزك إلى حالة <strong style="color:#EBB37B;">قيد المراجعة</strong>.</font><br><br>
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" dir="rtl" style="border-collapse:collapse;">
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>رقم الطلب:</strong></font> <font style="font-weight:bold;color:#247680;">{d['reqId']}</font></td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>المناسبة:</strong></font> {d['title']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>القاعة:</strong></font> {d['hall']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;"><font color="#888888" style="font-size:13px;"><strong>الوقت والتاريخ:</strong></font> {d['timeStr']} | {d['dateStr']}</td></tr>
-    </table>
-    """
-    send_brevo_email(d['email'], f"تحديث حالة الحجز — {d['reqId']} | {Config.ORG_AR}", generate_email_template(inner), bcc_list)
+    inner = (_badge('⏳ حالة الطلب: قيد المراجعة', '#EBB37B', '#333') +
+             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>أُعيد طلب حجزك إلى حالة <strong>قيد المراجعة</strong>.<br><br>"
+             + _table(_full_rows(d, '#247680')))
+    _send(d, 'تحديث حالة الحجز', inner, bcc_list)
 
 
 def send_update_email(d, bcc_list=None):
-    inner = f"""
-    <div style="text-align:center;margin-bottom:20px;background:#247680;color:#fff;padding:8px 25px;display:inline-block;font-weight:bold;">✏️ تم تحديث الحجز</div><br>
-    <font face="Tahoma,Arial,sans-serif">مرحباً <strong>{d['name']}</strong>،<br>تم <strong style="color:#247680;">تعديل بيانات حجزك</strong>. تفاصيل الحجز المحدثة:</font><br><br>
-    <table width="100%" border="0" cellpadding="0" cellspacing="0" dir="rtl" style="border-collapse:collapse;">
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>رقم الطلب:</strong></font> <font style="font-weight:bold;color:#247680;">{d['reqId']}</font></td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>المناسبة:</strong></font> {d['title']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;border-bottom:1px solid #e0e0e0;"><font color="#888888" style="font-size:13px;"><strong>القاعة:</strong></font> {d['hall']}</td></tr>
-      <tr><td style="background:#f0f7f7;padding:10px 20px;"><font color="#888888" style="font-size:13px;"><strong>الوقت والتاريخ:</strong></font> {d['timeStr']} | {d['dateStr']}</td></tr>
-    </table>
-    """
-    send_brevo_email(d['email'], f"تحديث الحجز — {d['reqId']} | {Config.ORG_AR}", generate_email_template(inner), bcc_list)
+    inner = (_badge('✏️ تم تحديث الحجز', '#247680') +
+             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم <strong>تعديل بيانات حجزك</strong>. تفاصيل الحجز المحدّثة:<br><br>"
+             + _table(_full_rows(d, '#247680')))
+    _send(d, 'تحديث الحجز', inner, bcc_list)

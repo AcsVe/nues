@@ -43,7 +43,7 @@ function render(){
   var html = ''+
     '<div class="top-bar">'+
       '<div class="logo-area">'+
-        '<img src="'+esc(LOGO)+'" alt="logo">'+
+        '<img src="'+esc(LOGO)+'" alt="'+(lang==='ar'?'شعار المؤسسة':'Organization logo')+'">'+
         '<div>'+
           '<h1 id="hdrTitle">'+esc(lang==='ar'?ORG_AR:ORG_EN)+'</h1>'+
           '<p id="hdrSub">'+(lang==='ar'?'نموذج طلب حجز قاعة أو مرفق':'Venue Booking Request Form')+'</p>'+
@@ -61,7 +61,7 @@ function render(){
         '<div class="card">'+
           '<h3><i class="fas fa-search"></i> <span id="secLookup">'+(lang==='ar'?'تعديل / إلغاء حجز موجود':'Amend / Cancel Existing Booking')+'</span></h3>'+
           '<div class="row2">'+
-            '<div class="fg"><label>'+(lang==='ar'?'رقم الطلب':'Request ID')+' <span class="req">*</span></label><input type="text" id="lookupId" placeholder="PUB-..." dir="ltr"></div>'+
+            '<div class="fg"><label>'+(lang==='ar'?'رقم الطلب':'Request ID')+' <span class="req">*</span></label><input type="text" id="lookupId" placeholder="BK-…" dir="ltr"></div>'+
             '<div class="fg"><label>'+(lang==='ar'?'البريد الإلكتروني':'Email')+' <span class="req">*</span></label><input type="email" id="lookupEmail" placeholder="example@email.com" dir="ltr"></div>'+
           '</div>'+
           '<button class="sub-btn secondary" id="btnLookup" type="button"><i class="fas fa-search"></i> <span id="tLookup">'+(lang==='ar'?'بحث عن حجزي':'Find My Booking')+'</span></button>'+
@@ -94,13 +94,13 @@ function render(){
             '<div class="fg"><label><span id="lFrom">'+(lang==='ar'?'من الساعة':'From')+'</span> <span class="req">*</span></label><input type="time" id="fStart"></div>'+
             '<div class="fg"><label><span id="lTo">'+(lang==='ar'?'إلى الساعة':'To')+'</span> <span class="req">*</span></label><input type="time" id="fEnd"></div>'+
           '</div>'+
-          '<div class="fg"><label id="lCC">'+(lang==='ar'?'نسخة إلى (إيميلات إضافية)':'CC (Additional Emails)')+'</label><input type="text" id="fCC" placeholder="email1@..., email2@..." dir="ltr"></div>'+
+          '<div class="fg"><label id="lCC">'+(lang==='ar'?'نسخة إلى (عناوين بريد إضافية)':'CC (Additional Emails)')+'</label><input type="text" id="fCC" placeholder="email1@..., email2@..." dir="ltr"></div>'+
           '<div class="fg"><label id="lNotes">'+(lang==='ar'?'ملاحظات إضافية':'Additional Notes')+'</label><textarea id="fNotes" placeholder="'+(lang==='ar'?'أي تفاصيل أو متطلبات خاصة...':'Any details or special requirements...')+'"></textarea></div>'+
         '</div>'+
 
         '<div class="card" id="attCard">'+
           '<h3><i class="fas fa-paperclip"></i> <span id="sec3">'+(lang==='ar'?'المرفقات':'Attachments')+'</span></h3>'+
-          '<label class="file-area"><i class="fas fa-cloud-upload-alt"></i><p>'+(lang==='ar'?'اضغط لرفع ملفات':'Click to upload files')+'</p><p style="font-size:11px;color:#bbb;margin-top:4px">'+(lang==='ar'?'الحد الأقصى 10 ميجا للملف':'Max 10MB per file')+'</p><input type="file" id="fileIn" multiple></label>'+
+          '<label class="file-area"><i class="fas fa-cloud-upload-alt"></i><p>'+(lang==='ar'?'اضغط لرفع ملفات':'Click to upload files')+'</p><p style="font-size:13px;color:#6b7280;margin-top:4px">'+(lang==='ar'?'الحد الأقصى 10 ميجا للملف':'Max 10MB per file')+'</p><input type="file" id="fileIn" multiple></label>'+
           '<div class="att-list" id="attList"></div>'+
         '</div>'+
 
@@ -141,12 +141,14 @@ function attach(){
   });
 }
 
+function ammanNow(){
+  var p=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Amman',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'})
+    .formatToParts(new Date()).reduce(function(a,x){a[x.type]=x.value;return a;},{});
+  return p.year+'-'+p.month+'-'+p.day+' | '+p.hour+':'+p.minute+':'+p.second;
+}
 function updateClock(){
-  var n = new Date();
-  var ds = n.toLocaleDateString(lang==='ar'?'ar-SA':'en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
-  var ts = n.toLocaleTimeString(lang==='ar'?'ar-SA':'en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   var el = document.getElementById('clockEl');
-  if (el) el.textContent = ds + ' | ' + ts;
+  if (el) { el.dir = 'ltr'; el.textContent = ammanNow(); }
 }
 
 function loadHalls(){
