@@ -109,23 +109,56 @@
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return alertBox(L('اكتب بريداً إلكترونياً صحيحاً.', 'Write a valid email address.'));
     if (!$('fTerms').checked) return alertBox(L('يجب الموافقة على شروط الاستخدام.', 'You must agree to the terms of use.'));
     var btn = $('subBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> ' + L('جارٍ الإرسال…', 'Submitting…');
-    fetch('/api/submit_booking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    lastBody = {
       fullName: name, email: email, phone: $('fPhone').value.trim(), onBehalf: $('fBehalf').value.trim(), eventTitle: title, hall: chosen,
       bookingDate: date, endDate: end, startTime: s, endTime: en, fullDay: full, notes: $('fNotes').value.trim(), ccEmails: $('fCC').value.trim(),
       attendees: $('fAttendees').value, extras: [].map.call(document.querySelectorAll('.ex:checked'), function (c) { return c.value; }),
       repeat: rep === 'none' ? null : { freq: rep, until: $('fRepUntil').value, count: $('fRepCount').value },
-      reminderAt: $('fRemind').value, attUrls: attachments.map(function (a) { return a.url; }) }) })
+      reminderAt: $('fRemind').value, attUrls: attachments.map(function (a) { return a.url; }) };
+    sendBooking(lastBody, true, function () { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> ' + L('إرسال الطلب', 'Submit the request'); });
+  });
+
+  // الإرسال بخطوتين: الأولى ترسل رمزاً إلى البريد، والثانية تلصق الرمز فيُنشأ الحجز (يمنع استعمال بريد عشوائي)
+  var lastBody = null, verifyToken = '';
+  function showDone(j) {
+    $('verifyCard').hidden = true; $('bookForm').hidden = true; $('done').hidden = false; $('reqId').textContent = j.reqId;
+    if (j.ticket) { $('doneTicket').href = j.ticket + '&lang=' + (AR ? 'ar' : 'en'); $('doneTicket').hidden = false; }
+    if (j.count > 1) { var n = document.createElement('p'); n.className = 'muted'; n.textContent = L('أُنشئ ' + j.count + ' حجزاً في السلسلة. الرقم أعلاه لأولها.', j.count + ' bookings were created in the series. The number above is the first.'); $('reqId').after(n); }
+    $('doneTitle').textContent = j.status === 'approved' ? L('تمّت الموافقة على حجزك', 'Your booking is approved') : L('تم استلام طلبك بنجاح', 'Your request was received');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  function vMsg(text, type) { $('vAlert').innerHTML = text ? '<div class="alert alert-' + (type || 'error') + '" role="alert">' + esc(text) + '</div>' : ''; }
+  function sendBooking(body, onMain, done) {
+    return fetch('/api/submit_booking', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error((AR ? j.error : (j.errorEn || j.error)) || ''); return j; }); })
       .then(function (j) {
-        $('bookForm').hidden = true; $('done').hidden = false; $('reqId').textContent = j.reqId;
-        if (j.ticket) { $('doneTicket').href = j.ticket + '&lang=' + (AR ? 'ar' : 'en'); $('doneTicket').hidden = false; }
-        if (j.count > 1) { var n = document.createElement('p'); n.className = 'muted'; n.textContent = L('أُنشئ ' + j.count + ' حجزاً في السلسلة. الرقم أعلاه لأولها.', j.count + ' bookings were created in the series. The number above is the first.'); $('reqId').after(n); }
-        $('doneTitle').textContent = j.status === 'approved' ? L('تمّت الموافقة على حجزك', 'Your booking is approved') : L('تم استلام طلبك بنجاح', 'Your request was received');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        if (j.needsCode) {
+          verifyToken = j.token; $('vMail').textContent = j.maskedEmail || ''; $('vMin').textContent = j.minutes || 15;
+          $('vCode').value = ''; vMsg(''); $('verifyCard').hidden = false; $('bookForm').hidden = true;
+          window.scrollTo({ top: 0, behavior: 'smooth' }); setTimeout(function () { $('vCode').focus(); }, 200);
+          if (done) done();
+          return;
+        }
+        showDone(j);
       })
       .catch(function (er) {
-        alertBox(er.message || L('تعذّر إرسال الطلب.', 'The request could not be sent.'));
-        btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> ' + L('إرسال الطلب', 'Submit the request');
+        var m = er.message || L('تعذّر إرسال الطلب.', 'The request could not be sent.');
+        if (onMain) alertBox(m); else vMsg(m);
+        if (done) done();
       });
+  }
+  $('vConfirm').addEventListener('click', function () {
+    var code = $('vCode').value.replace(/\D/g, '');
+    if (code.length !== 6) return vMsg(L('اكتب الرمز المكوّن من 6 أرقام.', 'Enter the 6-digit code.'));
+    var b = $('vConfirm'); b.disabled = true;
+    sendBooking(Object.assign({}, lastBody, { verifyToken: verifyToken, code: code }), false, function () { b.disabled = false; });
+  });
+  $('vResend').addEventListener('click', function () {
+    var b = $('vResend'); b.disabled = true; vMsg(L('جارٍ إرسال رمز جديد…', 'Sending a new code…'), 'success');
+    sendBooking(lastBody, false, function () { setTimeout(function () { b.disabled = false; }, 30000); });
+  });
+  $('vBack').addEventListener('click', function () {
+    $('verifyCard').hidden = true; $('bookForm').hidden = false;
+    var sb = $('subBtn'); sb.disabled = false; sb.innerHTML = '<i class="fas fa-paper-plane"></i> ' + L('إرسال الطلب', 'Submit the request');
   });
 })();

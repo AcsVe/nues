@@ -111,6 +111,20 @@ class BookingComment(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class BookingVerification(db.Model):
+    """طلب حجز ينتظر تأكيد البريد: رمز من 6 أرقام يصل إلى بريد صاحب الطلب ولا يُنشأ الحجز إلا بعد لصقه (يمنع استعمال بريد عشوائي)."""
+    __tablename__ = 'booking_verifications'
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False)
+    email = db.Column(db.String(150), nullable=False, index=True)
+    code_hash = db.Column(db.String(64), nullable=False)
+    payload = db.Column(db.Text, nullable=False)          # طلب الحجز كما أُرسل (JSON)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    attempts = db.Column(db.Integer, default=0)
+    used = db.Column(db.Boolean, default=False)
+
+
 class PasswordReset(db.Model):
     """رمز إعادة تعيين كلمة المرور: يُحفظ مشفّراً، صالح ساعة ولمرة واحدة."""
     __tablename__ = 'password_resets'

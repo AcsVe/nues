@@ -20,6 +20,18 @@
   </div>
 </div>
 
+<div id="verifyCard" class="card form-card" hidden>
+  <div class="card-title"><i class="fas fa-shield-halved"></i> {{ 'تأكيد البريد الإلكتروني' if ar else 'Confirm your email' }}</div>
+  <p>{{ 'أرسلنا رمزاً من 6 أرقام إلى' if ar else 'We sent a 6-digit code to' }} <b dir="ltr" id="vMail"></b>. {{ 'انسخه والصقه هنا لإتمام الحجز. الرمز صالح' if ar else 'Copy it and paste it here to finish the booking. The code is valid for' }} <b id="vMin"></b> {{ 'دقيقة.' if ar else 'minutes.' }}</p>
+  <p class="hint">{{ 'هذه الخطوة تتأكد أن البريد لك فعلاً. لم يصلك الرمز؟ انظر في البريد غير الهام أو اطلب رمزاً جديداً.' if ar else 'This step makes sure the email is really yours. No code? Check the spam folder or request a new one.' }}</p>
+  <div class="form-group" style="max-width:280px"><label for="vCode">{{ 'الرمز' if ar else 'Code' }}</label>
+    <input type="text" id="vCode" inputmode="numeric" autocomplete="one-time-code" maxlength="12" dir="ltr" style="font-size:1.6rem;letter-spacing:6px;text-align:center" placeholder="000000"></div>
+  <div id="vAlert"></div>
+  <div class="action-btns"><button class="btn btn-primary" type="button" id="vConfirm"><i class="fas fa-circle-check"></i> {{ 'تأكيد وإرسال الحجز' if ar else 'Confirm and send the booking' }}</button>
+    <button class="btn btn-outline" type="button" id="vResend">{{ 'إعادة إرسال الرمز' if ar else 'Resend the code' }}</button>
+    <button class="btn btn-outline" type="button" id="vBack">{{ 'تعديل البيانات' if ar else 'Edit the details' }}</button></div>
+</div>
+
 <form id="bookForm" class="form-card" novalidate>
   <div class="card">
     <div class="card-title"><i class="fas fa-building"></i> {{ 'اختيار المبنى أو المرفق' if ar else 'Choose the Building or Facility' }}</div>

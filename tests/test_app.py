@@ -504,3 +504,62 @@ def test_pulse_changes_with_bookings(admin, client):
     c = admin.get('/api/admin/pulse').get_json()
     assert c['sig'] != b['sig'] and c['pending'] == a['pending']
     assert client.get('/api/admin/pulse').status_code in (401, 403)
+
+
+def test_email_code_is_required_before_a_booking_exists(app, admin, client, monkeypatch):
+    import services
+    services._HITS.clear()                                                                      # حدّ الطلبات في العملية يتراكم عبر الاختبارات
+    import re
+    import email_service as mail
+    sent = []
+    monkeypatch.setattr(mail, 'graph_ready', lambda: True)
+    monkeypatch.setattr(mail, 'send_email', lambda to, subj, html, bcc=None: sent.append((to, subj, html)) or True)
+    before = len(admin.get('/api/admin/bookings').get_json())
+    r = book(client, bookingDate=day(50), email='me@example.org', fullName='سامي').get_json()
+    assert r['needsCode'] and r['token'] and r['maskedEmail'].startswith('me***@')
+    assert len(admin.get('/api/admin/bookings').get_json()) == before                      # لا حجز قبل الرمز
+    code = re.search(r'>(\d{6})<', sent[-1][2]).group(1)
+    assert sent[-1][0] == 'me@example.org' and code in sent[-1][1]
+    body = dict(bookingDate=day(50), hall=HALL, fullName='سامي', email='me@example.org', eventTitle='ندوة', startTime='10:00', endTime='11:00')
+    bad = client.post('/api/submit_booking', json=dict(body, verifyToken=r['token'], code='000000' if code != '000000' else '111111'))
+    assert bad.status_code == 400 and bad.get_json()['errorEn'] == 'The verification code is not correct'
+    ok = client.post('/api/submit_booking', json=dict(body, verifyToken=r['token'], code=code))
+    assert ok.status_code == 200 and ok.get_json()['reqId']
+    assert len(admin.get('/api/admin/bookings').get_json()) == before + 1
+    again = client.post('/api/submit_booking', json=dict(body, verifyToken=r['token'], code=code))
+    assert again.status_code == 400                                                         # الرمز مرة واحدة
+    # بعد 5 محاولات خاطئة يبطل الرمز، والأرقام لا تُخمَّن
+    r2 = book(client, bookingDate=day(51), email='me2@example.org').get_json()
+    for _ in range(5):
+        client.post('/api/submit_booking', json=dict(body, email='me2@example.org', verifyToken=r2['token'], code='123456'))
+    good = re.search(r'>(\d{6})<', sent[-1][2]).group(1)
+    assert client.post('/api/submit_booking', json=dict(body, email='me2@example.org', verifyToken=r2['token'], code=good)).status_code == 400
+    # إيقاف الميزة من الإعدادات
+    post(admin, '/api/admin/settings', verifyBookingEmail=False)
+    assert book(client, bookingDate=day(52), email='me3@example.org').get_json().get('reqId')
+    post(admin, '/api/admin/settings', verifyBookingEmail=True)
+
+
+def test_code_is_rate_limited_per_address(app, client, monkeypatch):
+    import services
+    services._HITS.clear()                                                                      # حدّ الطلبات في العملية يتراكم عبر الاختبارات
+    import email_service as mail
+    monkeypatch.setattr(mail, 'graph_ready', lambda: True)
+    monkeypatch.setattr(mail, 'send_email', lambda *a, **k: True)
+    import services
+    codes = 0
+    for i in range(services.VERIFY_PER_HOUR + 1):
+        r = book(client, bookingDate=day(300 + i), email='spam@example.org')
+        codes += 1 if r.get_json().get('needsCode') else 0
+    assert codes == services.VERIFY_PER_HOUR and r.status_code == 429
+
+
+def test_failed_email_send_creates_nothing(app, admin, client, monkeypatch):
+    import services
+    services._HITS.clear()                                                                      # حدّ الطلبات في العملية يتراكم عبر الاختبارات
+    import email_service as mail
+    monkeypatch.setattr(mail, 'graph_ready', lambda: True)
+    monkeypatch.setattr(mail, 'send_email', lambda *a, **k: False)
+    n = len(admin.get('/api/admin/bookings').get_json())
+    r = book(client, bookingDate=day(70), email='bad@example.org')
+    assert r.status_code == 502 and len(admin.get('/api/admin/bookings').get_json()) == n
