@@ -119,4 +119,8 @@
 
   if (window.PRE_DATE && /^\d{4}-\d{2}-\d{2}$/.test(window.PRE_DATE)) { cur = { y: +window.PRE_DATE.slice(0, 4), m: +window.PRE_DATE.slice(5, 7) }; }
   loadHalls().then(load, load);
+  // تحديث تلقائي: حجز جديد يظهر دون تحديث الصفحة
+  function refreshSoon() { if (!document.hidden && !document.getElementById('dayModal').classList.contains('open')) load(); }
+  setInterval(refreshSoon, 30000);
+  document.addEventListener('visibilitychange', refreshSoon);
 })();

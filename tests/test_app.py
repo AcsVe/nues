@@ -493,3 +493,14 @@ def test_terms_shown_and_editable(admin, client):
     assert admin.get('/api/admin/settings').get_json()['termsAr'] == 'شرط أول\nشرط ثانٍ'
     post(admin, '/api/admin/settings', termsAr='')
     assert 'يُستخدم المبنى' in client.get('/book').data.decode()
+
+
+def test_pulse_changes_with_bookings(admin, client):
+    a = admin.get('/api/admin/pulse').get_json()
+    j = book(client, bookingDate=day(45), startTime='20:00', endTime='21:00').get_json()
+    b = admin.get('/api/admin/pulse').get_json()
+    assert b['sig'] != a['sig'] and b['pending'] == a['pending'] + 1
+    post(admin, f"/api/admin/approve/{j['reqId']}")
+    c = admin.get('/api/admin/pulse').get_json()
+    assert c['sig'] != b['sig'] and c['pending'] == a['pending']
+    assert client.get('/api/admin/pulse').status_code in (401, 403)
