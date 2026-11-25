@@ -504,3 +504,29 @@ def test_pulse_changes_with_bookings(admin, client):
     c = admin.get('/api/admin/pulse').get_json()
     assert c['sig'] != b['sig'] and c['pending'] == a['pending']
     assert client.get('/api/admin/pulse').status_code in (401, 403)
+
+
+def test_booker_emails_have_links_and_the_number_on_top(app, admin, client, monkeypatch):
+    import email_service as mail
+    app.config['BASE_URL'] = 'https://acs.example'
+    sent = []
+    monkeypatch.setattr(mail, 'send_email', lambda to, subj, html, bcc=None: sent.append((to, subj, html)))
+    j = book(client, bookingDate=day(21), startTime='08:00', endTime='09:00').get_json()
+    rid = j['reqId']
+    post(admin, f'/api/admin/approve/{rid}')
+    post(admin, f'/api/admin/cancel/{rid}')
+    assert len(sent) >= 3
+    for to, subj, html in sent:
+        if to != 'a@example.org':
+            continue
+        assert f'/lookup?lang=ar&amp;id={rid}' in html or f'/lookup?lang=ar&id={rid}' in html           # الرقم قابل للنقر
+        assert '/calendar?lang=ar&amp;date=' in html or '/calendar?lang=ar&date=' in html
+        assert html.index(rid) < html.index('تفاصيل') if 'تفاصيل' in html else html.index(rid) < html.index('<table width="100%"')
+        assert 'font-size:17px' in html                                                                  # خط أكبر
+    approved = next(h for to, s, h in sent if 'موافقة' in s and to == 'a@example.org')
+    assert '/ticket/' in approved                                                                        # التأكيد الرسمي في الموافقة
+
+
+def test_lookup_page_prefills_from_the_email_link(client):
+    assert client.get('/lookup?lang=ar&id=BK-X&email=a%40example.org').status_code == 200
+    assert 'URLSearchParams' in client.get('/static/js/lookup.js').data.decode()

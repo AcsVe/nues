@@ -35,6 +35,13 @@
     if (b.ticket && b.status !== 'rejected') $('resActions').innerHTML += '<a class="btn btn-green" href="' + esc(b.ticket) + '&lang=' + (AR ? 'ar' : 'en') + '"><i class="fas fa-file-pdf"></i> ' + L('التأكيد الرسمي (طباعة / PDF)', 'Official confirmation (print / PDF)') + '</a>';
     $('result').hidden = false;
   }
+  // رابط البريد: يعبّئ رقم الحجز والبريد، فيبقى ضغطة واحدة على «استعلام»
+  try {
+    var q = new URLSearchParams(location.search), qi = (q.get('id') || '').trim(), qe = (q.get('email') || '').trim();
+    if (qi) $('lId').value = qi.slice(0, 50);
+    if (qe) $('lEmail').value = qe.slice(0, 100);
+    if (qi && qe) { var sb = document.querySelector('#lookForm button[type=submit], #lookForm button'); if (sb) sb.focus(); }
+  } catch (e) { /* لا يهم */ }
   $('lookForm').addEventListener('submit', function (e) {
     e.preventDefault(); say('lookAlert', ''); $('result').hidden = true; $('editCard').hidden = true;
     api('/api/lookup_booking', { reqId: $('lId').value.trim(), email: $('lEmail').value.trim() }).then(show)
