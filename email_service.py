@@ -102,17 +102,17 @@ def _template(inner):
 <tr><td align="center" bgcolor="{dark}" style="background-color:{dark};padding:25px;">{logo_html}</td></tr>
 <tr><td align="center" bgcolor="{dark}" style="background-color:{dark};padding:10px 25px 30px;">
 <font face="Tahoma,Arial,sans-serif" color="#EBB37B" style="font-size:22px;font-weight:bold;">{escape(b['org_ar'])}</font><br>
-<font face="Tahoma,Arial,sans-serif" color="#ffffff" style="font-size:13px;">{escape(b['sys_ar'])}</font></td></tr>
-<tr><td bgcolor="#ffffff" dir="rtl" style="background-color:#ffffff;padding:30px 25px;font-family:Tahoma,Arial,sans-serif;color:#333;font-size:14px;line-height:1.7;">{inner}</td></tr>
+<font face="Tahoma,Arial,sans-serif" color="#ffffff" style="font-size:16px;">{escape(b['sys_ar'])}</font></td></tr>
+<tr><td bgcolor="#ffffff" dir="rtl" style="background-color:#ffffff;padding:30px 25px;font-family:Tahoma,Arial,sans-serif;color:#222;font-size:17px;line-height:1.8;">{inner}</td></tr>
 <tr><td align="center" bgcolor="{dark}" style="background-color:{dark};padding:18px 25px;">
-<font face="Tahoma,Arial,sans-serif" color="#EBB37B" style="font-size:13px;">&copy; {yr} {escape(b['org_ar'])} — جميع الحقوق محفوظة</font></td></tr>
+<font face="Tahoma,Arial,sans-serif" color="#EBB37B" style="font-size:14px;">&copy; {yr} {escape(b['org_ar'])} — جميع الحقوق محفوظة</font></td></tr>
 </table></center></body></html>"""
 
 
 def _row(label, value, last=False, color=None):
     border = '' if last else 'border-bottom:1px solid #e0e0e0;'
     val = f'<font style="font-weight:bold;color:{color};">{escape(str(value))}</font>' if color else escape(str(value))
-    return (f'<tr><td style="background:#f0f7f7;padding:10px 20px;{border}"><font color="#666666" style="font-size:13px;">'
+    return (f'<tr><td style="background:#f0f7f7;padding:12px 20px;font-size:17px;{border}"><font color="#555555" style="font-size:15px;">'
             f'<strong>{label}:</strong></font> {val}</td></tr>')
 
 
@@ -122,8 +122,25 @@ def _table(rows):
 
 
 def _badge(text, bg, fg='#fff'):
-    return (f'<div style="text-align:center;margin-bottom:20px;background:{bg};color:{fg};padding:8px 25px;'
+    return (f'<div style="text-align:center;margin-bottom:16px;background:{bg};color:{fg};padding:10px 28px;font-size:19px;'
             f'display:inline-block;font-weight:bold;">{text}</div><br>')
+
+
+def _top(d, color='#0A7C86', ticket=False):
+    """أهم ما في رسالة صاحب الحجز، في أعلاها: رقم الحجز كبيراً وقابلاً للنقر (يفتح الاستعلام برقمه)، وأزرار الاستعلام والروزنامة والتأكيد الرسمي."""
+    rid = escape(d['reqId'])
+    num = (f'<a href="{escape(d["lookupUrl"])}" style="color:{color};text-decoration:underline;">{rid}</a>' if d.get('lookupUrl') else rid)
+    out = ('<div style="text-align:center;margin:4px 0 14px;padding:14px;background:#f5fafa;border:2px dashed #b9d6d8;">'
+           '<div style="font-size:15px;color:#555;">رقم الحجز' + (' (اضغط عليه للاستعلام عن الحجز)' if d.get('lookupUrl') else '') + '</div>'
+           f'<div dir="ltr" style="font-size:30px;font-weight:bold;letter-spacing:1px;color:{color};">{num}</div></div>')
+    btns = ''
+    if d.get('lookupUrl'):
+        btns += _button(d['lookupUrl'], 'الاستعلام عن الحجز أو تعديله', color)
+    if ticket and d.get('ticketUrl'):
+        btns += _button(d['ticketUrl'], 'التأكيد الرسمي (طباعة / PDF)', '#1e8449')
+    if d.get('calendarUrl'):
+        btns += _button(d['calendarUrl'], 'الروزنامة', '#5d6d7e')
+    return out + (f'<div style="text-align:center;margin:0 0 18px;">{btns}</div>' if btns else '')
 
 
 def _extra_rows(d):
@@ -156,17 +173,15 @@ def _send(d, subject_prefix, inner, bcc_list):
 
 def send_confirm_email(d, bcc_list=None):
     inner = (_badge('⏳ تم استلام طلبك', '#EBB37B', '#333') +
-             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم استلام طلب حجزك بنجاح وهو حالياً <strong>قيد المراجعة</strong>.<br><br>"
-             + _table(_full_rows(d, '#247680')) +
-             '<br><font style="font-size:13px;color:#666666;">سيتم إبلاغك بنتيجة المراجعة عبر البريد الإلكتروني.</font>')
+             f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم استلام طلب حجزك بنجاح وهو حالياً <strong>قيد المراجعة</strong>. سيصلك بريد بنتيجة المراجعة.<br><br>"
+             + _top(d, '#247680') + _table(_full_rows(d, '#247680')))
     _send(d, 'استلام طلب حجز', inner, bcc_list)
 
 
 def send_approve_email(d, bcc_list=None):
     inner = (_badge('✔️ تمت الموافقة', '#1e8449') +
              f"مرحباً <strong>{escape(d['name'])}</strong>،<br>يسعدنا إبلاغك بأنه <strong>تمت الموافقة</strong> على طلب حجزك.<br><br>"
-             + _table(_full_rows(d, '#1e8449'))
-             + (('<div style="text-align:center;margin:18px 0 4px;">' + _button(d['ticketUrl'], 'التأكيد الرسمي (طباعة / PDF)', '#0A7C86') + '</div>') if d.get('ticketUrl') else ''))
+             + _top(d, '#1e8449', ticket=True) + _table(_full_rows(d, '#1e8449')))
     _send(d, 'موافقة على طلب حجز', inner, bcc_list)
 
 
@@ -175,15 +190,16 @@ def send_reject_email(d, bcc_list=None):
              f"مرحباً <strong>{escape(d['name'])}</strong>،<br>نأسف لإبلاغك بأنه <strong>تم رفض</strong> طلب حجزك.<br><br>"
              f'<div style="background:#fff5f5;padding:12px 20px;border:1px solid #ffcdd2;color:#a93226;margin-bottom:15px;">'
              f"<strong>سبب الرفض:</strong> {escape(d.get('reason') or '')}</div>"
-             + _table([_row('رقم الطلب', d['reqId'], color='#c0392b'), _row('المناسبة', d['title'], last=True)]) +
-             '<br><font style="font-size:13px;color:#666666;">يمكنك تقديم طلب جديد في أي وقت.</font>')
+             + _top(d, '#c0392b') + _table([_row('رقم الطلب', d['reqId'], color='#c0392b'), _row('المناسبة', d['title'], last=True)])
+             + (('<div style="text-align:center;margin:18px 0 4px;">' + _button(d['bookUrl'], 'تقديم طلب جديد', '#0A7C86') + '</div>') if d.get('bookUrl') else
+                '<br>يمكنك تقديم طلب جديد في أي وقت.'))
     _send(d, 'رفض طلب حجز', inner, bcc_list)
 
 
 def send_cancel_email(d, bcc_list=None):
     inner = (_badge('🗑️ تم الإلغاء', '#5d6d7e') +
              f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم <strong>إلغاء حجزك</strong>.<br><br>"
-             + _table([_row('رقم الطلب', d['reqId'], color='#5d6d7e'), _row('المناسبة', d['title']),
+             + _top(d, '#5d6d7e') + _table([_row('رقم الطلب', d['reqId'], color='#5d6d7e'), _row('المناسبة', d['title']),
                        _row('القاعة', d['hall'], last=True)]))
     _send(d, 'إلغاء حجز', inner, bcc_list)
 
@@ -191,14 +207,14 @@ def send_cancel_email(d, bcc_list=None):
 def send_pending_email(d, bcc_list=None):
     inner = (_badge('⏳ حالة الطلب: قيد المراجعة', '#EBB37B', '#333') +
              f"مرحباً <strong>{escape(d['name'])}</strong>،<br>أُعيد طلب حجزك إلى حالة <strong>قيد المراجعة</strong>.<br><br>"
-             + _table(_full_rows(d, '#247680')))
+             + _top(d, '#247680') + _table(_full_rows(d, '#247680')))
     _send(d, 'تحديث حالة الحجز', inner, bcc_list)
 
 
 def send_update_email(d, bcc_list=None):
     inner = (_badge('✏️ تم تحديث الحجز', '#247680') +
              f"مرحباً <strong>{escape(d['name'])}</strong>،<br>تم <strong>تعديل بيانات حجزك</strong>. تفاصيل الحجز المحدّثة:<br><br>"
-             + _table(_full_rows(d, '#247680')))
+             + _top(d, '#247680') + _table(_full_rows(d, '#247680')))
     _send(d, 'تحديث الحجز', inner, bcc_list)
 
 
@@ -211,8 +227,8 @@ def EMAIL_OK(e):
 
 
 def _button(url, label, bg):
-    return (f'<a href="{escape(url)}" style="display:inline-block;background:{bg};color:#ffffff;padding:11px 26px;'
-            f'border-radius:8px;text-decoration:none;font-weight:bold;margin:4px 6px;">{label}</a>')
+    return (f'<a href="{escape(url)}" style="display:inline-block;background:{bg};color:#ffffff;padding:14px 30px;font-size:18px;'
+            f'border-radius:8px;text-decoration:none;font-weight:bold;margin:5px 6px;">{label}</a>')
 
 
 def _org():
@@ -232,8 +248,12 @@ def send_staff_new_booking(to, d, approve_url=None, reject_url=None):
     if approve_url and reject_url:
         buttons = ('<div style="text-align:center;margin:22px 0 6px;">' + _button(approve_url, 'موافقة', '#1e8449')
                    + _button(reject_url, 'رفض', '#c0392b') + '</div>')
-    inner = (_badge('🔔 حجز جديد بانتظار المراجعة', '#EBB37B', '#333') + 'وصل طلب حجز جديد:<br><br>'
-             + _table(rows) + buttons)
+    summary = (f'<div style="margin:6px 0 14px;padding:14px;background:#f5fafa;border:2px dashed #b9d6d8;text-align:center;">'
+               f'<div dir="ltr" style="font-size:26px;font-weight:bold;color:#0A7C86;">{escape(d["reqId"])}</div>'
+               f'<div style="font-size:19px;font-weight:bold;margin-top:4px;">{escape(d["title"])}</div>'
+               f'<div style="font-size:17px;">{escape(d["hall"])} — {escape(d["timeStr"])} | {escape(d["dateStr"])}</div></div>')
+    inner = (_badge('🔔 حجز جديد بانتظار المراجعة', '#EBB37B', '#333') + '<br>' + summary + buttons
+             + '<br><br>تفاصيل الطلب:<br><br>' + _table(rows))
     send_email(to, f"حجز جديد — {d['reqId']} | {_org()}", _template(inner))
 
 
@@ -265,7 +285,7 @@ def send_upcoming_reminder(to, d, lead_minutes):
 
 def send_booker_reminder(d, note=''):
     inner = (_badge('⏰ تذكير بحجزك', '#EBB37B', '#333') + f"مرحباً <strong>{escape(d['name'])}</strong>،<br>هذا تذكير بحجزك:<br><br>"
-             + _table(_full_rows(d, '#0A7C86'))
+             + _top(d, '#0A7C86') + _table(_full_rows(d, '#0A7C86'))
              + (f'<br><div style="padding:10px 14px;background:#f0f7f7;border-radius:8px;">{escape(note)}</div>' if note else ''))
     send_email(d['email'], f"تذكير بحجزك — {d['reqId']} | {_org()}", _template(inner))
 

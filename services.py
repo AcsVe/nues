@@ -164,7 +164,18 @@ def booking_payload(b):
             'hall': b.hall_name, 'timeStr': time_str, 'dateStr': date_str, 'notes': b.notes or '',
             'startTime': b.start_time or '', 'endTime': b.end_time or '',
             'attendees': b.attendees or '', 'extras': (b.extras or '').replace('\n', '، '),
-            'seriesCount': series_count(b), 'ticketUrl': ticket_url(b)}
+            'seriesCount': series_count(b), 'ticketUrl': ticket_url(b), **mail_links(b)}
+
+
+def mail_links(b):
+    """روابط رسائل البريد لصاحب الحجز: الاستعلام (برقم الحجز وبريده معبّأين) والروزنامة على يوم الحجز. فارغة إن لم يُضبط BASE_URL."""
+    from urllib.parse import quote
+    base = (current_app.config.get('BASE_URL') or '').rstrip('/')
+    if not base:
+        return {'lookupUrl': '', 'calendarUrl': '', 'bookUrl': ''}
+    return {'lookupUrl': f'{base}/lookup?lang=ar&id={quote(b.req_id)}&email={quote(b.email or "")}',
+            'calendarUrl': f'{base}/calendar?lang=ar&date={b.start_date:%Y-%m-%d}',
+            'bookUrl': f'{base}/book?lang=ar'}
 
 
 def series_count(b):

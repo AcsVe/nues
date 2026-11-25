@@ -185,3 +185,17 @@ body:has(.pub-foot){display:flex;flex-direction:column}
 body:has(.pub-foot) .container{flex:1 0 auto;width:100%}
 body:has(.pub-foot) #siteHeader{flex:none}
 @media (min-width:821px){body:has(.pub-foot) .container{padding-block:14px 10px}}
+
+/* الهاتف: رأس الروزنامة والجدول مضغوط (عنوان الصفحة المكرر يُخفى، والتنقل والعنوان في سطر، والأنواع تُمرَّر أفقياً) */
+@media (max-width:820px){
+  .page-head:has(+ .card .cal-bar){display:none}
+  .container .card:has(> .cal-bar){padding:12px 10px}
+  .cal-bar{gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center}
+  .cal-bar .cal-nav{order:2;flex:none}
+  .cal-bar .cal-title{order:1;flex:1 1 0;width:auto;min-width:0;text-align:start;font-size:1.1rem;margin:0}
+  .cal-bar .cal-filters,.cal-bar select{order:3;flex:1 1 100%;width:100%}
+  .chips{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;margin-bottom:8px;-webkit-overflow-scrolling:touch}
+  .chips .chip{flex:none}
+  .legend{flex-wrap:nowrap;gap:10px;font-size:.8125rem;margin-bottom:6px;white-space:nowrap;overflow-x:auto}
+  .sched-card .cal-bar .seg{order:4}
+}
