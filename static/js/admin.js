@@ -519,6 +519,29 @@
     post('/api/admin/archive-delete', { before: $('arcDate').value, confirm: $('arcConfirm').value.trim() }).then(function (r) { toast(L('حُذف ', 'Deleted ') + r.deleted + L(' حجزاً', ' bookings')); $('arcResult').innerHTML = ''; }).catch(fail);
   });
 
+  // ───── تحديث تلقائي: طلب جديد أو تغيير حالة يظهر دون تحديث الصفحة ─────
+  var pulseSig = null, pulsePending = null;
+  function userBusy() {
+    var panel = document.querySelector('.tab-panel.active');
+    return !!(document.querySelector('.modal-overlay.open') || (panel && (panel.querySelector('.bulk-item:checked') ||
+      [].some.call(panel.querySelectorAll('.dt-filter input, .dt-filter select, input[type=search]'), function (el) { return el.value; }))));
+  }
+  function pulse() {
+    if (document.hidden || !can(['bookings.view', 'reports', 'calendar'])) return;
+    api('/api/admin/pulse').then(function (p) {
+      if (pulseSig !== null && p.sig !== pulseSig) {
+        if (pulsePending !== null && p.pending > pulsePending) toast(L('وصل طلب حجز جديد', 'A new booking request arrived'));
+        if ($('nbPending')) $('nbPending').textContent = p.pending;
+        var tab = (location.hash || '#home').slice(1), fn = { home: loadHome, bookings: loadBookings, calview: loadCal }[tab];
+        if (fn && !userBusy()) fn(); else if (fn) toast(L('تغيّرت الحجوزات، اضغط زر التحديث لعرض الجديد', 'Bookings changed, press refresh to see the new data'));
+      }
+      pulseSig = p.sig; pulsePending = p.pending;
+    }).catch(function () { /* انقطاع مؤقت */ });
+  }
+  setInterval(pulse, 20000);
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) pulse(); });
+  pulse();
+
   // ───── تثبيت التطبيق (PWA) ─────
   var deferred = null, ib = $('installAppBtn');
   window.addEventListener('beforeinstallprompt', function (e) { deferred = e; if (ib) ib.style.display = 'flex'; });

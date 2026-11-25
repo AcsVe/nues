@@ -173,6 +173,9 @@
   $('scChips').addEventListener('click', function (e) { var b = e.target.closest('.chip'); if (b) { cat = b.dataset.cat; fillControls(); render(); } });
 
   if (window.PRE_DATE && /^\d{4}-\d{2}-\d{2}$/.test(window.PRE_DATE)) cur = window.PRE_DATE;
+  function refreshSoon() { if (!document.hidden && halls.length && !$('scModal').classList.contains('open')) load(); }
+  setInterval(refreshSoon, 30000);
+  document.addEventListener('visibilitychange', refreshSoon);
   fetch('/api/halls').then(function (r) { return r.json(); }).then(function (h) {
     halls = h; if (window.PRE_HALL && h.some(function (x) { return x.nameAr === window.PRE_HALL; })) hallSel = window.PRE_HALL;
     fillControls(); load();

@@ -306,6 +306,18 @@ def add_comment(req_id):
     return jsonify({'success': True})
 
 
+@api_bp.route('/pulse')
+@admin_required(('bookings.view', 'reports', 'calendar'))
+def pulse():
+    """بصمة خفيفة لحالة الحجوزات: تتغير عند أي طلب جديد أو تغيير حالة أو تعديل، فتكتشفها اللوحة دون تحديث يدوي."""
+    counts = {s: Booking.query.filter_by(status=s).count() for s in svc.STATUSES}
+    last = db.session.query(db.func.max(Booking.id)).scalar() or 0
+    changed = db.session.query(db.func.max(Booking.action_date)).scalar()
+    sig = f"{last}|{counts['pending']}|{counts['approved']}|{counts['rejected']}|{counts['cancelled']}|{changed:%Y%m%d%H%M%S}" if changed else \
+        f"{last}|{counts['pending']}|{counts['approved']}|{counts['rejected']}|{counts['cancelled']}|0"
+    return jsonify({'sig': sig, 'pending': counts['pending']})
+
+
 @api_bp.route('/stats')
 @admin_required(('bookings.view', 'reports', 'calendar'))
 def get_stats():
