@@ -95,6 +95,11 @@ EN_MSG = {
     'هذا الاسم المختصر مستخدم': 'This short name is already used',
     'اكتب التاريخ': 'Enter the date',
     'اكتب كلمة التأكيد': 'Type the confirmation word',
+    'رمز التحقق غير صحيح': 'The verification code is not correct',
+    'انتهت صلاحية الرمز، اطلب رمزاً جديداً': 'The code has expired, request a new one',
+    'محاولات خاطئة كثيرة، اطلب رمزاً جديداً': 'Too many wrong attempts, request a new code',
+    'تعذّر إرسال رمز التحقق إلى البريد، تحقق من العنوان وحاول لاحقاً': 'The verification code could not be sent, check the address and try later',
+    'أُرسلت رموز كثيرة إلى هذا البريد، حاول بعد ساعة': 'Too many codes were sent to this address, try again in an hour',
 }
 
 
@@ -213,6 +218,58 @@ def terms_text(lang):
     """نص الشروط والأحكام: ما حرّره المدير، وإلا النص الافتراضي."""
     key, default = ('terms_ar', DEFAULT_TERMS_AR) if lang != 'en' else ('terms_en', DEFAULT_TERMS_EN)
     return (AppSetting.get_str(key, '') or '').strip() or default
+
+
+# ───────────── تأكيد البريد برمز قبل إنشاء الحجز ─────────────
+VERIFY_MINUTES = 15
+VERIFY_MAX_ATTEMPTS = 5
+VERIFY_PER_HOUR = 5
+
+
+def verification_on():
+    """التأكيد يعمل ما دام مفعّلاً في الإعدادات والبريد مُعدّاً لإرسال الرمز."""
+    return AppSetting.get_bool('verify_booking_email', True) and mail.graph_ready()
+
+
+def _code_hash(token, code):
+    import hashlib
+    return hashlib.sha256(f'{token}:{str(code).strip()}'.encode()).hexdigest()
+
+
+def start_verification(email, name, payload):
+    """ينشئ طلب تأكيد ويرسل الرمز؛ يرجع (token، None) أو (None، رسالة خطأ)."""
+    import json
+    from models import BookingVerification
+    since = datetime.utcnow() - timedelta(hours=1)
+    if BookingVerification.query.filter(BookingVerification.email == email.lower(), BookingVerification.created_at >= since).count() >= VERIFY_PER_HOUR:
+        return None, 'أُرسلت رموز كثيرة إلى هذا البريد، حاول بعد ساعة'
+    token = secrets.token_urlsafe(24)
+    code = f'{secrets.randbelow(1000000):06d}'
+    db.session.add(BookingVerification(token=token, email=email.lower(), code_hash=_code_hash(token, code),
+                                       payload=json.dumps(payload, ensure_ascii=False), expires_at=datetime.utcnow() + timedelta(minutes=VERIFY_MINUTES)))
+    db.session.commit()
+    if not notify(mail.send_verification_code, email, name, code, VERIFY_MINUTES):
+        return None, 'تعذّر إرسال رمز التحقق إلى البريد، تحقق من العنوان وحاول لاحقاً'
+    return token, None
+
+
+def check_verification(token, code):
+    """يتحقق من الرمز؛ يرجع (طلب الحجز المحفوظ، None) أو (None، رسالة خطأ). الرمز يُستعمل مرة واحدة."""
+    import json
+    import hmac
+    from models import BookingVerification
+    rec = BookingVerification.query.filter_by(token=txt(token, 64)).first()
+    if not rec or rec.used or rec.expires_at < datetime.utcnow():
+        return None, 'انتهت صلاحية الرمز، اطلب رمزاً جديداً'
+    if (rec.attempts or 0) >= VERIFY_MAX_ATTEMPTS:
+        return None, 'محاولات خاطئة كثيرة، اطلب رمزاً جديداً'
+    if not hmac.compare_digest(rec.code_hash, _code_hash(rec.token, code)):
+        rec.attempts = (rec.attempts or 0) + 1
+        db.session.commit()
+        return None, 'رمز التحقق غير صحيح'
+    rec.used = True
+    db.session.commit()
+    return json.loads(rec.payload), None
 
 
 REPEATS = ('none', 'daily', 'weekly', 'monthly')

@@ -751,6 +751,7 @@ def change_password():
 BOOL_SETTINGS = {   # المفتاح في الواجهة ← (المفتاح المخزَّن، الافتراضي، الصلاحية)
     'autoApproveBookings': ('auto_approve_bookings', False, 'settings.approval'),
     'publicShowDetails': ('public_show_details', False, 'settings.approval'),
+    'verifyBookingEmail': ('verify_booking_email', True, 'settings.approval'),
     'remindersEnabled': ('reminders_enabled', True, 'settings.reminders'),
     'reminderScheduledEnabled': ('reminder_scheduled_enabled', True, 'settings.reminders'),
     'staffDailySummaryEnabled': ('staff_daily_summary_enabled', False, 'settings.reminders'),

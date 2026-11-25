@@ -290,6 +290,17 @@ def send_booker_reminder(d, note=''):
     send_email(d['email'], f"تذكير بحجزك — {d['reqId']} | {_org()}", _template(inner))
 
 
+def send_verification_code(to, name, code, minutes=15):
+    """رمز تأكيد البريد قبل إنشاء الحجز: الرمز كبيراً في أول الرسالة."""
+    inner = (_badge('🔐 رمز تأكيد الحجز', '#0A7C86')
+             + f'<div style="text-align:center;margin:6px 0 14px;padding:16px;background:#f5fafa;border:2px dashed #b9d6d8;">'
+               f'<div style="font-size:15px;color:#555;">انسخ هذا الرمز والصقه في صفحة الحجز</div>'
+               f'<div dir="ltr" style="font-size:42px;font-weight:bold;letter-spacing:8px;color:#0A7C86;">{escape(str(code))}</div></div>'
+             + f'مرحباً <strong>{escape(name or "")}</strong>،<br>وصلنا طلب حجز بهذا البريد. الرمز صالح <strong>{int(minutes)} دقيقة</strong> ويُستعمل مرة واحدة.<br>'
+             '<font style="font-size:15px;color:#666666;">إن لم تطلب حجزاً فتجاهل هذه الرسالة، ولن يُنشأ أي حجز.</font>')
+    return send_email(to, f'رمز تأكيد الحجز {code} | {_org()}', _template(inner))
+
+
 def send_password_reset(to, name, link):
     inner = (_badge('🔑 إعادة تعيين كلمة المرور', '#0A7C86') + f'مرحباً <strong>{escape(name or "")}</strong>،<br>'
              'وصلنا طلب لإعادة تعيين كلمة مرور حسابك. الرابط صالح ساعة واحدة ويُستعمل مرة واحدة:<br>'

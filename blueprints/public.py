@@ -236,6 +236,12 @@ def submit_booking():
     if not svc.rate_ok('submit', 20, 3600):
         return err_json('طلبات كثيرة، حاول لاحقاً', 429)
     data = request.get_json(silent=True) or {}
+    verified = False
+    if data.get('verifyToken'):                    # الخطوة الثانية: الرمز الواصل إلى البريد، والطلب المحفوظ هو الذي يُنفَّذ
+        saved, msg = svc.check_verification(data.get('verifyToken'), data.get('code'))
+        if msg:
+            return err_json(msg, 400)
+        data, verified = saved, True
     name, email = svc.txt(data.get('fullName'), 100), svc.txt(data.get('email'), 100)
     title = svc.txt(data.get('eventTitle'), 200)
     if not name or not title:
@@ -267,6 +273,14 @@ def submit_booking():
                         'conflicts': [d.strftime('%Y-%m-%d') for d, _, _ in bad]})
         resp.status_code = 409
         return resp
+
+    if not verified and svc.verification_on():     # الخطوة الأولى: الطلب سليم، فيُرسل الرمز ولا يُنشأ حجز قبل لصقه
+        tok, msg = svc.start_verification(email, name, data)
+        if msg:
+            return err_json(msg, 429 if 'كثيرة' in msg else 502)
+        user, _, host = email.partition('@')
+        return jsonify({'needsCode': True, 'token': tok, 'minutes': svc.VERIFY_MINUTES,
+                        'maskedEmail': f'{user[:2]}***@{host}'})
 
     series = 'SR-' + secrets.token_hex(4).upper() if len(starts) > 1 else None
     rows = []

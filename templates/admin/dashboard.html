@@ -272,6 +272,7 @@
       </div>
       <div class="card" data-perm="settings.approval">
         <div class="card-title"><i class="fas fa-circle-check"></i> {{ 'الاعتماد التلقائي' if ar else 'Automatic approval' }}</div>
+        <label class="check-line"><input type="checkbox" id="sVerifyEmail"> <span>{{ 'تأكيد البريد برمز قبل إنشاء أي حجز من الصفحة العامة (يصل الرمز إلى بريد صاحب الطلب ويلصقه لإتمام الحجز؛ يعمل متى كان البريد مُعدّاً)' if ar else 'Confirm the email with a code before any booking from the public page is created (the code is emailed to the applicant, who pastes it to finish; works when email is configured)' }}</span></label>
         <label class="check-line"><input type="checkbox" id="sPublicDetails"> <span>{{ 'إظهار عناوين المناسبات للعموم في الروزنامة والجدول (الافتراضي: مخفية، فيظهر «محجوز» فقط، ولا يظهر اسم صاحب الحجز أبداً)' if ar else 'Show event titles to the public in the calendar and schedule (default: hidden, so only “Booked” shows, and the applicant name is never shown)' }}</span></label>
         <label class="check-line"><input type="checkbox" id="sAutoApprove"> <span>{{ 'اعتماد كل حجز جديد فور تقديمه (ما عدا المباني والمرافق التي تتطلب موافقة مسبقة). تصل الإشعارات كالمعتاد.' if ar else 'Approve every new booking as soon as it is submitted (except buildings and facilities that need prior approval). Notices are sent as usual.' }}</span></label>
       </div>

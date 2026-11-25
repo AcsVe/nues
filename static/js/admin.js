@@ -381,7 +381,7 @@
     api('/api/admin/settings').then(function (s) {
       var set = function (id, v) { var el = $(id); if (el) el.value = v; };
       set('sOrgAr', s.orgAr); set('sOrgEn', s.orgEn); set('sAccent', s.accent); set('sSummaryTime', s.staffDailySummaryTime || '07:00'); set('sLead', s.staffReminderLeadMinutes || '');
-      $('sAutoApprove').checked = !!s.autoApproveBookings; $('sPublicDetails').checked = !!s.publicShowDetails; $('sRemindersOn').checked = !!s.remindersEnabled; $('sRemindScheduled').checked = !!s.reminderScheduledEnabled; $('sSummaryOn').checked = !!s.staffDailySummaryEnabled;
+      $('sAutoApprove').checked = !!s.autoApproveBookings; $('sPublicDetails').checked = !!s.publicShowDetails; $('sVerifyEmail').checked = s.verifyBookingEmail !== false; $('sRemindersOn').checked = !!s.remindersEnabled; $('sRemindScheduled').checked = !!s.reminderScheduledEnabled; $('sSummaryOn').checked = !!s.staffDailySummaryEnabled;
       $('sTermsAr').value = s.termsAr || ''; $('sTermsEn').value = s.termsEn || ''; $('sTermsAr').placeholder = s.termsDefaultAr; $('sTermsEn').placeholder = s.termsDefaultEn;
       var img = $('sLogoImg'); if (s.logo) { img.src = s.logo; img.style.display = ''; } else img.style.display = 'none';
       $('sMail').textContent = s.mail ? L('البريد الإلكتروني مُفعَّل (المرسل: ', 'Email is on (sender: ') + s.sender + ')' : L('البريد الإلكتروني غير مُعدّ: لا تُرسل رسائل الحجز ولا التذكيرات.', 'Email is not set up: booking messages and reminders are not sent.');
@@ -398,6 +398,7 @@
     api('/api/admin/logo', { method: 'POST', body: fd }).then(function () { toast(L('تم رفع الشعار', 'Logo uploaded')); loadSettings(); }).catch(fail);
   });
   $('sLogoDel').addEventListener('click', function () { if (confirm(L('إزالة الشعار؟ تظهر أيقونة النظام بدلاً منه.', 'Remove the logo? The system icon is shown instead.'))) post('/api/admin/logo/delete').then(function () { toast(L('تمت الإزالة', 'Removed')); loadSettings(); }).catch(fail); });
+  $('sVerifyEmail').addEventListener('change', function () { post('/api/admin/settings', { verifyBookingEmail: this.checked }).then(function () { toast(L('تم الحفظ', 'Saved')); }).catch(fail); });
   $('sPublicDetails').addEventListener('change', function () { post('/api/admin/settings', { publicShowDetails: this.checked }).then(function () { toast(L('تم الحفظ', 'Saved')); }).catch(fail); });
   $('sAutoApprove').addEventListener('change', function () { post('/api/admin/settings', { autoApproveBookings: this.checked }).then(function () { toast(L('تم الحفظ', 'Saved')); }).catch(fail); });
   $('sRemindSave').addEventListener('click', function () {
