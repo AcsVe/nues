@@ -48,7 +48,7 @@
   // ───── الساعة والتبويبات ─────
   setInterval(function () { $('clockEl').textContent = ammanNow().replace(' ', ' | '); }, 1000); $('clockEl').textContent = ammanNow().replace(' ', ' | ');
   var TITLES = { home: L('الرئيسية', 'Home'), bookings: L('طلبات الحجز', 'Booking requests'), calview: L('التقويم', 'Calendar'), blocked: L('غير متاح', 'Unavailable'),
-    reports: L('التقارير', 'Reports'), halls: L('المباني والمرافق', 'Buildings and facilities'), contacts: L('جهات الاتصال', 'Contacts'),
+    reports: L('التقارير', 'Reports'), audit: L('سجل التدقيق', 'Audit log'), halls: L('المباني والمرافق', 'Buildings and facilities'), contacts: L('جهات الاتصال', 'Contacts'),
     ticker: L('الشريط الإخباري', 'News ticker'), links: L('الروابط المختصرة', 'Short links'), archive: L('الأرشفة', 'Archive'), settings: L('الإعدادات', 'Settings'), users: L('المستخدمون والصلاحيات', 'Users and permissions') };
   var loaded = {};
   function showTab(name, force) {
@@ -58,7 +58,7 @@
     $('pageTitle').textContent = TITLES[name] || '';
     if (window.closeSidebar) window.closeSidebar();
     try { history.replaceState(null, '', '#' + name); } catch (e) { /* لا يهم */ }
-    var load = { bookings: loadBookings, calview: loadCal, blocked: loadBlocked, reports: loadReports, halls: loadHalls, contacts: loadContacts, ticker: loadTicker, links: loadLinks, archive: function () { /* يعمل بالأزرار */ }, settings: loadSettings, users: loadUsers, home: loadHome }[name];
+    var load = { bookings: loadBookings, calview: loadCal, blocked: loadBlocked, reports: loadReports, audit: loadAudit, halls: loadHalls, contacts: loadContacts, ticker: loadTicker, links: loadLinks, archive: function () { /* يعمل بالأزرار */ }, settings: loadSettings, users: loadUsers, home: loadHome }[name];
     if (load && (force || !loaded[name] || name === 'home' || name === 'bookings')) { loaded[name] = true; load(); }
     window.scrollTo(0, 0);
   }
@@ -291,6 +291,7 @@
 
   // ───── التقارير ─────
   function loadReports() {
+    loadOccupancy();
     api('/api/admin/stats').then(function (s) {
       var max = Math.max.apply(null, s.byHall.map(function (x) { return x.count; }).concat([1]));
       $('chartTop').innerHTML = s.byHall.length ? s.byHall.slice(0, 10).map(function (x) { return '<div class="bar-item"><div class="bar-label"><bdi>' + esc(hallLabel(x.hall)) + '</bdi></div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(6, x.count / max * 100) + '%"><span>' + x.count + '</span></div></div></div>'; }).join('') : '<p class="muted">' + L('لا بيانات.', 'No data.') + '</p>';
@@ -299,6 +300,44 @@
       var months = Object.keys(s.byMonth).sort().reverse(), names = s.byHall.map(function (x) { return x.hall; });
       $('monthTable').innerHTML = months.length ? '<div class="table-wrap"><table><thead><tr><th>' + L('الشهر', 'Month') + '</th>' + names.map(function (n) { return '<th><bdi>' + esc(hallLabel(n)) + '</bdi></th>'; }).join('') + '<th>' + L('المجموع', 'Total') + '</th></tr></thead><tbody>' +
         months.map(function (m) { var tot = 0; return '<tr><td dir="ltr">' + m + '</td>' + names.map(function (n) { var v = s.byMonth[m][n] || 0; tot += v; return '<td>' + (v || '') + '</td>'; }).join('') + '<td><b>' + tot + '</b></td></tr>'; }).join('') + '</tbody></table></div>' : '<p class="muted">' + L('لا بيانات.', 'No data.') + '</p>';
+    }).catch(fail);
+  }
+
+  // ───── تقرير الإشغال ─────
+  function ymd(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function loadOccupancy() {
+    if (!$('ocFrom').value) { var n = new Date(); $('ocFrom').value = ymd(new Date(n.getFullYear(), n.getMonth(), 1)); $('ocTo').value = ymd(new Date(n.getFullYear(), n.getMonth() + 1, 0)); }
+    api('/api/admin/occupancy?from=' + $('ocFrom').value + '&to=' + $('ocTo').value).then(function (o) {
+      $('ocNote').textContent = L('النسبة = الساعات المحجوزة (حجوزات معتمدة) ÷ ساعات التشغيل من ', 'Rate = booked hours (approved bookings) ÷ operating hours from ') + o.openFrom + L(' إلى ', ' to ') + o.openTo + L(' في ', ' over ') + o.days + L(' يوماً. الحجز ليوم كامل يشغل كل ساعات التشغيل.', ' day(s). A full-day booking fills all operating hours.');
+      var cols = [{ h: L('المبنى أو المرفق', 'Building or facility'), filter: 'text' }, { h: L('النوع', 'Type'), filter: 'select' }, { h: L('الحجوزات', 'Bookings'), sort: 'num' }, { h: L('أيام الاستخدام', 'Days used'), sort: 'num' }, { h: L('الساعات المحجوزة', 'Booked hours'), sort: 'num' }, { h: L('نسبة الإشغال', 'Occupancy'), sort: 'num' }];
+      var rows = o.halls.map(function (h) { var nmx = hallLabel(h.hall);
+        return '<tr><td><bdi>' + esc(nmx) + '</bdi></td><td data-value="' + esc(catLabel(h.category)) + '">' + esc(catLabel(h.category)) + '</td><td data-value="' + h.bookings + '">' + h.bookings + '</td><td data-value="' + h.daysUsed + '">' + h.daysUsed + '</td><td data-value="' + h.hours + '">' + h.hours + '</td>' +
+          '<td data-value="' + h.percent + '"><div class="bar-track" style="min-width:120px"><div class="bar-fill" style="width:' + Math.max(6, h.percent) + '%"><span>' + h.percent + '%</span></div></div></td></tr>'; }).join('');
+      $('ocBox').innerHTML = o.halls.length ? tableHtml('oc', cols, rows, { noSelect: true }) : '<p class="muted">' + L('لا بيانات.', 'No data.') + '</p>';
+      if (o.halls.length) mount($('ocBox'), 'oc', [], function () { /* بلا إجراءات جماعية */ });
+    }).catch(fail);
+  }
+  $('ocRun').addEventListener('click', loadOccupancy);
+
+  // ───── سجل التدقيق ─────
+  var AUDIT = {
+    login: ['تسجيل دخول', 'Sign-in'], booking_action: ['إجراء على حجز', 'Booking action'], bookings_bulk: ['إجراء جماعي على الحجوزات', 'Bulk booking action'],
+    admin_update_booking: ['تعديل حجز', 'Booking edited'], add_comment: ['تعليق على حجز', 'Booking comment'],
+    add_hall: ['إضافة مبنى أو مرفق', 'Building or facility added'], update_hall: ['تعديل مبنى أو مرفق', 'Building or facility edited'], delete_hall: ['حذف مبنى أو مرفق', 'Building or facility deleted'], halls_bulk: ['إجراء جماعي على المباني', 'Bulk building action'],
+    add_blocked: ['إضافة فترة غير متاحة', 'Unavailable period added'], delete_blocked: ['حذف فترة غير متاحة', 'Unavailable period deleted'], blocked_bulk: ['إجراء جماعي على الفترات', 'Bulk period action'],
+    add_contact: ['إضافة جهة اتصال', 'Contact added'], update_contact: ['تعديل جهة اتصال', 'Contact edited'], delete_contact: ['حذف جهة اتصال', 'Contact deleted'], contacts_bulk: ['إجراء جماعي على جهات الاتصال', 'Bulk contact action'], export_contacts: ['تصدير جهات الاتصال', 'Contacts exported'],
+    add_user: ['إضافة مستخدم', 'User added'], update_user: ['تعديل مستخدم', 'User edited'], delete_user: ['حذف مستخدم', 'User deleted'], users_bulk: ['إجراء جماعي على المستخدمين', 'Bulk user action'], change_password: ['تغيير كلمة المرور', 'Password changed'],
+    save_settings: ['تعديل الإعدادات', 'Settings changed'], upload_logo: ['رفع الشعار', 'Logo uploaded'], delete_logo: ['حذف الشعار', 'Logo removed'], set_ticker: ['تعديل الشريط الإخباري', 'News ticker changed'],
+    save_link: ['حفظ رابط مختصر', 'Short link saved'], links_bulk: ['إجراء جماعي على الروابط', 'Bulk link action'], archive_delete: ['حذف الحجوزات المؤرشفة', 'Archived bookings deleted'], archive_export: ['تصدير الأرشيف', 'Archive exported'], full_export: ['تنزيل النسخة الكاملة', 'Full backup downloaded']
+  };
+  function auditName(a) { var x = AUDIT[a]; return x ? L(x[0], x[1]) : L('إجراء إداري', 'Administrative action'); }
+  function loadAudit() {
+    api('/api/admin/audit').then(function (d) {
+      var box = $('auditBox'); if (!d.length) { box.innerHTML = empty('clipboard-list', L('لا أحداث بعد.', 'No events yet.')); return; }
+      var cols = [{ h: L('الوقت', 'Time'), filter: 'text' }, { h: L('المستخدم', 'User'), filter: 'select' }, { h: L('الإجراء', 'Action'), filter: 'select' }, { h: L('الهدف', 'Target'), filter: 'text' }, { h: L('تفاصيل', 'Details'), filter: 'text' }, { h: L('العنوان', 'Address'), filter: 'text' }];
+      var rows = d.map(function (r) { var nm2 = auditName(r.action);
+        return '<tr><td dir="ltr" data-value="' + esc(r.at) + '"><span dir="ltr">' + esc(r.at) + '</span></td><td data-value="' + esc(r.user) + '"><bdi>' + esc(r.user) + '</bdi></td><td data-value="' + esc(nm2) + '">' + esc(nm2) + '</td><td dir="ltr">' + esc(r.target) + '</td><td dir="ltr">' + esc(r.detail) + '</td><td dir="ltr">' + esc(r.ip) + '</td></tr>'; }).join('');
+      box.innerHTML = tableHtml('audit', cols, rows, { noSelect: true }); mount(box, 'audit', [], function () { /* للقراءة فقط */ });
     }).catch(fail);
   }
 
@@ -531,13 +570,25 @@
     if (document.hidden || !can(['bookings.view', 'reports', 'calendar'])) return;
     api('/api/admin/pulse').then(function (p) {
       if (pulseSig !== null && p.sig !== pulseSig) {
-        if (pulsePending !== null && p.pending > pulsePending) toast(L('وصل طلب حجز جديد', 'A new booking request arrived'));
+        if (pulsePending !== null && p.pending > pulsePending) { toast(L('وصل طلب حجز جديد', 'A new booking request arrived')); desktopNotify(); }
         if ($('nbPending')) $('nbPending').textContent = p.pending;
         var tab = (location.hash || '#home').slice(1), fn = { home: loadHome, bookings: loadBookings, calview: loadCal }[tab];
         if (fn && !userBusy()) fn(); else if (fn) toast(L('تغيّرت الحجوزات، اضغط زر التحديث لعرض الجديد', 'Bookings changed, press refresh to see the new data'));
       }
       pulseSig = p.sig; pulsePending = p.pending;
     }).catch(function () { /* انقطاع مؤقت */ });
+  }
+  // إشعار المتصفح بالطلب الجديد (يُطلب الإذن مرة بالضغط على زر الجرس في الأعلى؛ لا خدمة خارجية)
+  function desktopNotify() {
+    try { if (window.Notification && Notification.permission === 'granted') new Notification(L('طلب حجز جديد', 'New booking request'), { body: L('وصل طلب حجز جديد بانتظار المراجعة.', 'A new booking request is waiting for review.'), icon: '/static/icon.png' }); } catch (e) { /* لا يهم */ }
+  }
+  var nb = $('notifyBtn');
+  if (nb) {
+    if (!window.Notification) nb.style.display = 'none';
+    else {
+      var paint = function () { nb.classList.toggle('on', Notification.permission === 'granted'); nb.title = nb.ariaLabel = Notification.permission === 'granted' ? L('إشعارات الطلبات الجديدة مفعّلة', 'New-request notifications are on') : L('تفعيل إشعارات الطلبات الجديدة', 'Turn on new-request notifications'); };
+      paint(); nb.addEventListener('click', function () { if (Notification.permission === 'denied') return toast(L('الإشعارات محظورة من إعدادات المتصفح لهذا الموقع', 'Notifications are blocked in the browser settings for this site'), true); Notification.requestPermission().then(paint); });
+    }
   }
   setInterval(pulse, 20000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) pulse(); });

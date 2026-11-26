@@ -7,6 +7,7 @@ CATALOGUE = {
     'calendar': ('التقويم', 'Calendar', 'daily'),
     'blocked': ('الفترات غير المتاحة', 'Unavailable periods', 'daily'),
     'reports': ('التقارير', 'Reports', 'lists'),
+    'audit': ('سجل التدقيق', 'Audit log', 'lists'),
     'halls': ('المباني والمرافق', 'Buildings and facilities', 'admin'),
     'contacts': ('جهات الاتصال', 'Contacts', 'admin'),
     'ticker': ('الشريط الإخباري', 'News ticker', 'admin'),

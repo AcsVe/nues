@@ -75,6 +75,7 @@
     </div>
     <div class="nav-group"><div class="nav-group-title">{{ 'القوائم والتقارير' if ar else 'Lists and reports' }}</div>
       {{ tab_btn('reports', 'reports', 'chart-column', 'التقارير', 'Reports') }}
+      {{ tab_btn('audit', 'audit', 'clipboard-list', 'سجل التدقيق', 'Audit log') }}
     </div>
     <div class="nav-group"><div class="nav-group-title">{{ 'الإدارة' if ar else 'Administration' }}</div>
       {{ tab_btn('halls', 'halls', 'building', 'المباني والمرافق', 'Buildings and facilities') }}
@@ -95,6 +96,7 @@
     <div class="page-title" id="pageTitle">{{ 'الرئيسية' if ar else 'Home' }}</div>
     <div class="top-actions">
       <span class="top-clock" id="clockEl" dir="ltr"></span>
+      <button class="icon-btn" type="button" id="notifyBtn" title="{{ 'تفعيل إشعارات الطلبات الجديدة' if ar else 'Turn on new-request notifications' }}" aria-label="{{ 'تفعيل إشعارات الطلبات الجديدة' if ar else 'Turn on new-request notifications' }}"><i class="fas fa-bell"></i></button>
       <button class="icon-btn" type="button" id="refreshBtn" title="{{ 'تحديث' if ar else 'Refresh' }}" aria-label="{{ 'تحديث' if ar else 'Refresh' }}"><i class="fas fa-rotate"></i></button>
       {% set q = request.args.to_dict() %}{% set _ = q.update({'lang': 'en' if ar else 'ar'}) %}
       <a class="lang-switch" href="?{{ q|urlencode }}">{{ 'English' if ar else 'العربية' }}</a>
@@ -182,6 +184,21 @@
         <div class="card"><div class="card-title"><i class="fas fa-shapes"></i> {{ 'الحجوزات المعتمدة حسب النوع' if ar else 'Approved bookings by type' }}</div><div id="chartCat"></div></div>
       </div>
       <div class="card"><div class="card-title"><i class="fas fa-table"></i> {{ 'الحجوزات المعتمدة لكل مبنى حسب الشهر' if ar else 'Approved bookings per building by month' }}</div><div id="monthTable"></div></div>
+      <div class="card"><div class="card-title"><i class="fas fa-gauge-high"></i> {{ 'تقرير الإشغال' if ar else 'Occupancy report' }}</div>
+        <div class="toolbar">
+          <label for="ocFrom">{{ 'من' if ar else 'From' }}</label><input type="date" id="ocFrom" dir="ltr">
+          <label for="ocTo">{{ 'إلى' if ar else 'To' }}</label><input type="date" id="ocTo" dir="ltr">
+          <button class="btn btn-primary" type="button" id="ocRun"><i class="fas fa-play"></i> {{ 'عرض' if ar else 'Show' }}</button>
+        </div>
+        <div class="hint" id="ocNote"></div>
+        <div id="ocBox"></div>
+      </div>
+    </div>
+
+    <!-- ── سجل التدقيق ── -->
+    <div class="tab-panel" id="tab-audit">
+      <div class="alert alert-info"><i class="fas fa-circle-info"></i> {{ 'يُسجَّل هنا كل دخول وكل إجراء إداري (اعتماد، رفض، تعديل، حذف، إعدادات، مستخدمون...) مع صاحبه ووقته، ويُعرض آخر ألف حدث.' if ar else 'Every sign-in and administrative action (approve, reject, edit, delete, settings, users...) is recorded here with who did it and when. The latest thousand events are shown.' }}</div>
+      <div id="auditBox"></div>
     </div>
 
     <!-- ── المباني والمرافق ── -->

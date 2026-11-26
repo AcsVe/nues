@@ -199,3 +199,5 @@ body:has(.pub-foot) #siteHeader{flex:none}
   .legend{flex-wrap:nowrap;gap:10px;font-size:.8125rem;margin-bottom:6px;white-space:nowrap;overflow-x:auto}
   .sched-card .cal-bar .seg{order:4}
 }
+
+.icon-btn.on{background:var(--primary-soft);color:var(--primary);border-color:var(--primary)}
