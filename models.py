@@ -214,6 +214,18 @@ class AdminUser(db.Model):
                 'lastLogin': self.last_login.strftime('%Y-%m-%d %H:%M') if self.last_login else ''}
 
 
+class AuditLog(db.Model):
+    """سجل التدقيق: من فعل ماذا ومتى (إجراءات الإدارة والدخول). لا يحمل كلمات مرور ولا نصوص الحجوزات."""
+    __tablename__ = 'audit_log'
+    id = db.Column(db.Integer, primary_key=True)
+    at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    user = db.Column(db.String(120))
+    action = db.Column(db.String(60))
+    target = db.Column(db.String(80))
+    detail = db.Column(db.String(200))
+    ip = db.Column(db.String(60))
+
+
 def get_setting(key, default=None):
     v = AppSetting.get_str(key, '')
     return v if v != '' else default

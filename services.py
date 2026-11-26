@@ -27,6 +27,16 @@ def amman_now():
         return datetime.utcnow() + timedelta(hours=3)
 
 
+def to_amman(dt):
+    """وقت محفوظ بالتوقيت العالمي (naive) ← توقيت عمّان."""
+    try:
+        from zoneinfo import ZoneInfo
+        from datetime import timezone
+        return dt.replace(tzinfo=timezone.utc).astimezone(ZoneInfo('Asia/Amman')).replace(tzinfo=None)
+    except Exception:  # noqa: BLE001
+        return dt + timedelta(hours=3)
+
+
 def rate_ok(bucket, limit, window):
     """حدّ لعدد الطلبات من العنوان نفسه في نافذة زمنية (يحمي النماذج العامة من الإغراق)."""
     key = (bucket, auth.client_ip())
@@ -449,3 +459,48 @@ def send_status_mail(b, status, reason='', extra_bcc=''):
         notify(mail.send_cancel_email, p, bcc_list=build_bcc(b.email, b.cc_emails))
     elif status == 'pending':
         notify(mail.send_pending_email, p, bcc_list=build_bcc(b.email, b.cc_emails, contact_emails(b.hall_name, 'notify_new')))
+
+
+# ───────────── تقرير الإشغال ─────────────
+OPEN_FROM, OPEN_TO = '08:00', '20:00'     # ساعات التشغيل المعتمدة لحساب النسبة
+
+
+def _mins(t):
+    try:
+        h, m = str(t).split(':')[:2]
+        return int(h) * 60 + int(m)
+    except (ValueError, AttributeError):
+        return None
+
+
+def occupancy(start, end):
+    """ساعات الحجز المعتمد ونسبة الإشغال لكل مبنى أو مرفق فعّال بين تاريخين (شاملين).
+    النسبة = الساعات المحجوزة ÷ (عدد الأيام × ساعات التشغيل)؛ والحجز ليوم كامل يشغل كل ساعات التشغيل."""
+    lo, hi = _mins(OPEN_FROM), _mins(OPEN_TO)
+    window, days = hi - lo, (end - start).days + 1
+    halls = Hall.query.filter_by(active=True).order_by(Hall.id).all()
+    out = {h.name_ar: {'hall': h.name_ar, 'hallEn': h.name_en or '', 'category': h.category or 'hall',
+                       'bookings': 0, 'minutes': 0, 'daysUsed': set()} for h in halls}
+    rows = Booking.query.filter(Booking.status == 'approved', Booking.start_date <= end,
+                                Booking.end_date >= start, Booking.hall_name.in_(list(out))).all()
+    for b in rows:
+        o = out[b.hall_name]
+        o['bookings'] += 1
+        s_min, e_min = _mins(b.start_time), _mins(b.end_time)
+        d, last = max(b.start_date, start), min(b.end_date or b.start_date, end)
+        while d <= last:
+            if b.full_day or s_min is None:
+                used = window
+            else:
+                used = max(0, min(e_min if e_min is not None else hi, hi) - max(s_min, lo))
+            if used:
+                o['minutes'] += used
+                o['daysUsed'].add(d)
+            d += timedelta(days=1)
+    res = []
+    for o in out.values():
+        res.append({'hall': o['hall'], 'hallEn': o['hallEn'], 'category': o['category'], 'bookings': o['bookings'],
+                    'hours': round(o['minutes'] / 60, 1), 'daysUsed': len(o['daysUsed']),
+                    'percent': round(100 * o['minutes'] / (window * days), 1) if window * days else 0})
+    res.sort(key=lambda r: (-r['percent'], r['hall']))
+    return {'from': start.isoformat(), 'to': end.isoformat(), 'days': days, 'openFrom': OPEN_FROM, 'openTo': OPEN_TO, 'halls': res}

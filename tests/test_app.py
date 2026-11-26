@@ -588,3 +588,35 @@ def test_booker_emails_have_links_and_the_number_on_top(app, admin, client, monk
 def test_lookup_page_prefills_from_the_email_link(client):
     assert client.get('/lookup?lang=ar&id=BK-X&email=a%40example.org').status_code == 200
     assert 'URLSearchParams' in client.get('/static/js/lookup.js').data.decode()
+
+
+def test_audit_log_records_admin_actions_without_secrets(admin, client, app):
+    r = book(client, bookingDate=day(150)); assert r.status_code == 200, r.get_json()
+    rid = r.get_json()['reqId']
+    assert post(admin, f'/api/admin/approve/{rid}').status_code == 200
+    post(admin, '/api/admin/password', current='wrong', new='Another-pass-9')   # فشل: لا يُسجَّل
+    rows = admin.get('/api/admin/audit').get_json()
+    acts = [(r['action'], r['target'], r['detail']) for r in rows]
+    assert ('login', 'admin', '') in acts
+    assert ('booking_action', rid, 'approve') in acts
+    assert 'change_password' not in [a for a, _, _ in acts]
+    assert 'Secret-pass-1' not in str(rows) and 'Another-pass-9' not in str(rows)
+    assert admin.get('/api/admin/audit').get_json()[0]['at'][:2] == '20'
+
+
+def test_audit_needs_permission(app, admin):
+    post(admin, '/api/admin/users/add', username='auditor1', password='Viewer-pass-1', perms=['reports'])
+    c = login(app, 'auditor1', 'Viewer-pass-1')
+    assert c.get('/api/admin/audit').status_code == 403
+    assert c.get('/api/admin/occupancy').status_code == 200
+
+
+def test_occupancy_counts_approved_hours(admin, client):
+    d = day(160)
+    r = book(client, bookingDate=d, startTime='09:00', endTime='11:00')
+    rid = r.get_json()['reqId']
+    post(admin, f'/api/admin/approve/{rid}')
+    o = admin.get(f'/api/admin/occupancy?from={d}&to={d}').get_json()
+    hall = [h for h in o['halls'] if h['hours'] == 2.0]
+    assert hall and hall[0]['bookings'] == 1 and hall[0]['percent'] == round(100 * 2 / 12, 1)
+    assert admin.get('/api/admin/occupancy?from=2026-01-10&to=2026-01-01').status_code == 400

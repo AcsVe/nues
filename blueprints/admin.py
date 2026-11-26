@@ -11,7 +11,7 @@ from flask import (Blueprint, Response, abort, current_app, jsonify, redirect, r
 
 import email_service as mail
 import services as svc
-from models import (AdminUser, AppSetting, BlockedPeriod, Booking, BookingComment, BookingReminder, CATEGORIES,
+from models import (AdminUser, AuditLog, AppSetting, BlockedPeriod, Booking, BookingComment, BookingReminder, CATEGORIES,
                     CATEGORY_NAMES, Contact, Hall, PasswordReset, db)
 from services import err_json, parse_date, txt
 from utils import auth
@@ -20,6 +20,21 @@ from utils.perms import CATALOGUE, PRESETS, can, clean
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 api_bp = Blueprint('admin_api', __name__, url_prefix='/api/admin')
+
+
+_AUDIT_GET = {'full_export', 'archive_export', 'export_contacts'}     # تنزيلات تُسجَّل رغم أنها GET
+_AUDIT_DETAIL = ('action', 'scope')
+
+
+def audit(action, target='', detail='', user=None):
+    """يسجّل حدثاً في سجل التدقيق. لا يُرمى منه خطأ أبداً حتى لا يعطّل الإجراء الأصلي."""
+    try:
+        u = user or auth.current_user()
+        db.session.add(AuditLog(user=(u.username if u else '')[:120], action=action[:60], target=str(target or '')[:80],
+                                detail=str(detail or '')[:200], ip=(auth.client_ip() or '')[:60]))
+        db.session.commit()
+    except Exception:                       # noqa: BLE001
+        db.session.rollback()
 
 
 def _lang():
@@ -65,6 +80,7 @@ def login():
                 user.last_login = datetime.utcnow()
                 db.session.commit()
                 auth.sign_in(user, request.form.get('remember') == '1')
+                audit('login', user.username, user=user)
                 return redirect(_safe_next(request.form.get('next')) or url_for('admin.dashboard', lang=lang))
             auth.note_failure(ip)
             error = 'اسم المستخدم أو كلمة المرور غير صحيحة' if lang == 'ar' else 'Incorrect username or password'
@@ -124,6 +140,29 @@ def reset_password(token):
 
 
 # ───────────── الجلسة ─────────────
+@api_bp.after_request
+def _audit_admin_actions(resp):
+    """كل إجراء إداري ناجح (غير القراءة) يُسجَّل تلقائياً: الاسم والإجراء والهدف وعدد المتأثرين، دون أي نص حر."""
+    name = (request.endpoint or '').rsplit('.', 1)[-1]
+    if resp.status_code >= 400 or name in ('audit_list', 'occupancy_report') or \
+            (request.method == 'GET' and name not in _AUDIT_GET):
+        return resp
+    body = request.get_json(silent=True) if request.is_json else None
+    body = body if isinstance(body, dict) else {}
+    out = resp.get_json(silent=True) if resp.mimetype == 'application/json' else None
+    out = out if isinstance(out, dict) else {}
+    target = (request.view_args or {}).get('req_id') or (request.view_args or {}).get('id') or body.get('id') or ''
+    bits = [str(request.view_args['action'])] if (request.view_args or {}).get('action') else []
+    bits += [f'{k}={body[k]}' for k in _AUDIT_DETAIL if isinstance(body.get(k), str)]
+    bits += [f'{k}={out[k]}' for k in ('count', 'done', 'deleted') if isinstance(out.get(k), int)]
+    if isinstance(body.get('reqIds'), list):
+        bits.append(f'n={len(body["reqIds"])}')
+    elif isinstance(body.get('ids'), list):
+        bits.append(f'n={len(body["ids"])}')
+    audit(name, target, ' '.join(bits))
+    return resp
+
+
 @api_bp.route('/session')
 def admin_session():
     u = auth.current_user()
@@ -316,6 +355,25 @@ def pulse():
     sig = f"{last}|{counts['pending']}|{counts['approved']}|{counts['rejected']}|{counts['cancelled']}|{changed:%Y%m%d%H%M%S}" if changed else \
         f"{last}|{counts['pending']}|{counts['approved']}|{counts['rejected']}|{counts['cancelled']}|0"
     return jsonify({'sig': sig, 'pending': counts['pending']})
+
+
+@api_bp.route('/audit')
+@admin_required('audit')
+def audit_list():
+    rows = AuditLog.query.order_by(AuditLog.id.desc()).limit(1000).all()
+    return jsonify([{'id': r.id, 'at': svc.to_amman(r.at).strftime('%Y-%m-%d %H:%M'),
+                     'user': r.user or '', 'action': r.action, 'target': r.target or '', 'detail': r.detail or '', 'ip': r.ip or ''} for r in rows])
+
+
+@api_bp.route('/occupancy')
+@admin_required(('reports',))
+def occupancy_report():
+    today = datetime.now().date()
+    start = parse_date(request.args.get('from')) or today.replace(day=1)
+    end = parse_date(request.args.get('to')) or (start + timedelta(days=29))
+    if end < start or (end - start).days > 366:
+        return err_json('المدة غير صالحة (حتى سنة واحدة)')
+    return jsonify(svc.occupancy(start, end))
 
 
 @api_bp.route('/stats')
